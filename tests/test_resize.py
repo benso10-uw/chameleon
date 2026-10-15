@@ -101,12 +101,24 @@ def test_easy_design_with_passing_preset_never_asks_for_a_layout():
     assert check(task["source"], out, task["target_canvas"]).passes
 
 
+def unbreakable_word_task():
+    """A design whose preset layout must break a rule: one word too long to
+    wrap overflows any box, at low space pressure."""
+    task = load_task("level1_warmup")
+    for el in task["source"]["elements"]:
+        if el["id"] == "cta":
+            el["content"] = "W" * 120
+    return task
+
+
 def test_easy_design_whose_preset_breaks_a_rule_is_promoted_to_hard():
-    task, preset = baseline("level3_advanced")
+    task = unbreakable_word_task()
+    preset = resize(task["source"], task["target_canvas"], model=NoModel())
     assert not check(task["source"], preset, task["target_canvas"]).passes
     model = FakeModel(understanding_reply(task["source"], "easy"), layouts=["not json"] * 3)
     resize(task["source"], task["target_canvas"], model=model)
-    assert len(model.prompts["layout"]) >= 1
+    assert len(model.prompts["layout"]) == 3
+    assert "Difficulty: hard" in model.prompts["layout"][0]
 
 
 def test_high_space_pressure_overrides_an_easy_judgement():

@@ -25,8 +25,8 @@ from engine.text_metrics import measure_text
 WIDE_ASPECT = 1.4
 STRIP_ASPECT = 4.5
 HERO_MAX_SHARE = 0.42
-COPY_MIN_SHARE = 0.35
 SEARCH_STEPS = 40
+IMAGE_MIN_SHARE = 0.3  # in a strip, images may shrink to 30% of the height
 
 
 @dataclass
@@ -56,11 +56,11 @@ def preset_layout(source: dict[str, Any], target: dict[str, Any],
     placed: dict[str, dict[str, Any]] = {}
 
     content = [el for el in source["elements"] if roles.get(el["id"]) not in LAYERING_ROLES]
-    blocks = _blocks(content, priorities)
-    margin = max(4.0, round(0.05 * min(W, H)))
-    gap = max(margin, 0.02 * W)
-    area = (margin, margin, W - margin, H - margin)
     aspect = W / H
+    blocks = _blocks(content, priorities, rows=aspect <= STRIP_ASPECT)
+    margin = max(4.0, round(0.05 * min(W, H)))
+    gap = max(margin, (0.012 if aspect > STRIP_ASPECT else 0.02) * W)
+    area = (margin, margin, W - margin, H - margin)
 
     if aspect > STRIP_ASPECT:
         _strip(blocks, area, gap, roles, placed, source["canvas"])
@@ -97,7 +97,8 @@ def preset_layout(source: dict[str, Any], target: dict[str, Any],
 # Blocks
 # ---------------------------------------------------------------------------
 
-def _blocks(content: list[dict[str, Any]], priorities: dict[str, int]) -> list[Block]:
+def _blocks(content: list[dict[str, Any]], priorities: dict[str, int],
+            rows: bool = True) -> list[Block]:
     units: list[list[dict[str, Any]]] = []
     by_group: dict[str, list[dict[str, Any]]] = {}
     for el in content:
@@ -116,6 +117,8 @@ def _blocks(content: list[dict[str, Any]], priorities: dict[str, int]) -> list[B
                      union(bbox(m) for m in members))
 
     blocks = sorted((make(u) for u in units), key=lambda b: (b.box[1], b.box[0]))
+    if not rows:
+        return blocks
 
     # Rows: blocks side by side in the source (overlapping vertically, apart
     # horizontally) travel together as one rigid block.
@@ -227,8 +230,7 @@ def _column(blocks: list[Block], area, roles, placed, src_canvas) -> None:
         return out
 
     def fits(scale, floor_mode):
-        hs = heights(scale, floor_mode)
-        return sum(hs) + gap * (len(hs) - 1) <= ah
+        return _column_fits(blocks, aw, ah, roles, scale, floor_mode)
 
     max_scale = max(aw / src_canvas["width"], ah / src_canvas["height"]) * 1.0
     scale, mode = None, "normal"
@@ -289,43 +291,120 @@ def _align_x(block: Block, w: float, area, src_w: float, src_cx: float) -> float
 
 
 def _strip(blocks: list[Block], area, gap, roles, placed, src_canvas) -> None:
-    """One row of cells: each rigid block in its own cell fitted to the
-    height, all standalone text sharing one cell."""
+    """One row of cells across a very wide, short canvas. Each rigid block
+    gets a cell fitted to the height; neighbouring badges share a cell,
+    stacked; all standalone text shares one cell, given the width it needs.
+    Rigid cells squeeze (towards their readability floor) until the text
+    fits; floors relax only when nothing else works."""
     aw, ah = area[2] - area[0], area[3] - area[1]
-    rigid = [b for b in blocks if b.kind == "rigid"]
-    texts = [b for b in blocks if b.kind == "text"]
+    texts = sorted((b for b in blocks if b.kind == "text"), key=lambda b: (b.box[1], b.box[0]))
+    rigid = sorted((b for b in blocks if b.kind == "rigid"), key=lambda b: (b.box[1] + b.box[3]) / 2)
 
-    # Reading order; the text cell sits where its most important text was.
-    cells: list[Any] = sorted(rigid, key=lambda b: (b.box[1] + b.box[3]) / 2)
+    # Neighbouring badges stack into one cell.
+    cells: list[list[Block]] = []
+    for b in rigid:
+        is_badge = all(roles.get(m["id"]) == "badge" for m in b.members)
+        prev = cells[-1] if cells else None
+        if is_badge and prev and all(roles.get(m["id"]) == "badge" for pb in prev for m in pb.members)                 and not any(m.get("rotation") for pb in prev + [b] for m in pb.members):
+            prev.append(b)
+        else:
+            cells.append([b])
+
+    inner_gap = 0.06 * ah
+    order: list[Any] = list(cells)
     if texts:
         lead = min(texts, key=lambda b: b.priority)
         lead_y = (lead.box[1] + lead.box[3]) / 2
-        idx = sum(1 for b in cells if (b.box[1] + b.box[3]) / 2 < lead_y)
-        cells.insert(idx, "text")
+        idx = sum(1 for c in cells if (c[0].box[1] + c[0].box[3]) / 2 < lead_y)
+        order.insert(idx, "text")
+    gaps = gap * (len(order) - 1)
 
-    scales = {id(b): min(ah / b.height, 1.0) for b in rigid}
-    rigid_w = sum(b.width * scales[id(b)] for b in rigid)
-    gaps = gap * (len(cells) - 1)
-    copy_w = COPY_MIN_SHARE * aw if texts else 0.0
-    available = aw - gaps - copy_w
-    if rigid_w > available and rigid_w > 0:
-        squeeze = max(available, 0.0) / rigid_w
-        for b in rigid:
-            scales[id(b)] *= squeeze
-        rigid_w = sum(b.width * scales[id(b)] for b in rigid)
+    def cell_size(cell, s):
+        return (max(b.width for b in cell) * s,
+                sum(b.height for b in cell) * s + inner_gap * (len(cell) - 1))
+
+    def cell_range(cell, floor_mode):
+        stack_h = sum(b.height for b in cell)
+        s_max = min(1.0, (ah - inner_gap * (len(cell) - 1)) / stack_h)
+        floors = [_floor(t, roles, floor_mode) / t["font_size"] for b in cell for t in b.texts]
+        s_min = max(floors) if floors else IMAGE_MIN_SHARE * s_max
+        return s_min, s_max
+
+    for floor_mode in ("normal", "low", "none"):
+        ranges = [cell_range(c, floor_mode) for c in cells]
+        if any(lo > hi + 1e-9 for lo, hi in ranges):
+            continue
+        text_w = _column_min_width(texts, ah, roles, floor_mode) if texts else 0.0
+
+        # Squeeze lowest-priority cells first: as u falls from n to 0, cell k
+        # (0 = most important) shrinks once u drops below k + 1.
+        rank = {id(c): k for k, c in enumerate(sorted(cells, key=lambda c: min(b.priority for b in c)))}
+
+        def scales_at(u):
+            return [lo + min(max(u - rank[id(c)], 0.0), 1.0) * (hi - lo)
+                    for c, (lo, hi) in zip(cells, ranges)]
+
+        def total(u):
+            return sum(cell_size(c, sc)[0] for c, sc in zip(cells, scales_at(u)))
+
+        if total(0.0) + gaps + text_w > aw:
+            continue
+        u = _search(lambda u: total(u) + gaps + text_w <= aw, 0.0, float(len(cells)))
+        scales = scales_at(u)
+        break
+    else:  # nothing fits even with no floors: squeeze everything in proportion
+        floor_mode = "none"
+        scales = [hi for _, hi in (cell_range(c, "none") for c in cells)]
+        text_w = 0.25 * aw if texts else 0.0
+        room = max(aw - gaps - text_w, 0.0)
+        widths = sum(cell_size(c, s)[0] for c, s in zip(cells, scales))
+        if widths > room:
+            scales = [s * room / widths for s in scales]
+
+    rigid_w = sum(cell_size(c, s)[0] for c, s in zip(cells, scales))
     text_w = aw - gaps - rigid_w
-
+    scale_of = {id(c): s for c, s in zip(cells, scales)}
     x = area[0]
-    for cell in cells:
+    for cell in order:
         if cell == "text":
-            _column(sorted(texts, key=lambda b: (b.box[1], b.box[0])),
-                    (x, area[1], x + text_w, area[3]), roles, placed, src_canvas)
+            _column(texts, (x, area[1], x + text_w, area[3]), roles, placed, src_canvas)
             x += text_w + gap
+            continue
+        s = scale_of[id(cell)]
+        w, h = cell_size(cell, s)
+        y = area[1] + (ah - h) / 2
+        for b in cell:
+            _place_rigid(b, s, x + (w - b.width * s) / 2, y, placed)
+            y += b.height * s + inner_gap
+        x += w + gap
+
+
+def _column_fits(blocks: list[Block], aw: float, ah: float, roles, scale: float,
+                 floor_mode: str) -> bool:
+    gap = 0.04 * ah
+    total = gap * (len(blocks) - 1)
+    for b in blocks:
+        if b.kind == "text":
+            el = b.members[0]
+            total += measure_text(el, font_size=_text_size(el, scale, roles, floor_mode),
+                                  width=aw).height
         else:
-            s = scales[id(cell)]
-            h = cell.height * s
-            _place_rigid(cell, s, x, area[1] + (ah - h) / 2, placed)
-            x += cell.width * s + gap
+            total += b.height * _rigid_scale(b, scale, aw, ah, roles, floor_mode)
+    return total <= ah
+
+
+def _column_min_width(blocks: list[Block], ah: float, roles, floor_mode: str) -> float:
+    """Narrowest column in which `blocks` fit at their floors."""
+    lo, hi = 1.0, 4000.0
+    if not _column_fits(blocks, hi, ah, roles, 1e-3, floor_mode):
+        return hi
+    for _ in range(SEARCH_STEPS):
+        mid = (lo + hi) / 2
+        if _column_fits(blocks, mid, ah, roles, 1e-3, floor_mode):
+            hi = mid
+        else:
+            lo = mid
+    return hi * 1.02
 
 
 def _search(ok, lo: float, hi: float) -> float:

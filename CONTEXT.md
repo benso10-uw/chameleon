@@ -49,7 +49,7 @@ _Avoid_: formation, arrangement
 ### Checking
 
 **Rule**:
-A requirement every returned layout must satisfy: every element present exactly once and still visible, required fields intact, nothing off the target canvas, images in proportion.
+A requirement every returned layout must satisfy: every element present exactly once and still visible, required fields intact, nothing off the target canvas, images in proportion, groups intact, and text fitting its box at 6px or more.
 _Avoid_: hard check, constraint
 
 **Signal**:
