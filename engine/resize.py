@@ -16,6 +16,7 @@ The engine follows ADR-0001 (docs/adr/0001-llm-generates-hard-layouts.md):
 """
 
 import copy
+import traceback
 from typing import Any, Optional
 
 from engine.breakdown import infer_roles
@@ -25,17 +26,24 @@ from engine.llm import LLMBudget
 from engine.model import ModelAdapter, default_model
 from engine.preset import preset_layout
 from engine.repair import repair
+from engine.trace import Trace, record, tracing
 from engine.understand import understand
 
 
 def resize(source: dict[str, Any], target_canvas: dict[str, Any],
-           model: Optional[ModelAdapter] = None) -> dict[str, Any]:
+           model: Optional[ModelAdapter] = None, trace: Optional[Trace] = None) -> dict[str, Any]:
+    """`trace`, if given, receives a record of every step (see engine/trace.py)."""
     target = {"width": target_canvas["width"], "height": target_canvas["height"]}
-    try:
-        return _resize(source, target, model or default_model())
-    except Exception:
-        # Never let one design take the whole run down.
-        return _safe_layout(source, target)
+    with tracing(trace):
+        try:
+            return _resize(source, target, model or default_model())
+        except Exception as exc:
+            # Never let one design take the whole run down.
+            record("error", error=repr(exc), traceback=traceback.format_exc())
+            layout = _safe_layout(source, target)
+            record("result", winner="last-resort layout", reason="the engine raised an error",
+                   layout=layout)
+            return layout
 
 
 def _resize(source: dict[str, Any], target: dict[str, Any], model: ModelAdapter) -> dict[str, Any]:
@@ -45,12 +53,26 @@ def _resize(source: dict[str, Any], target: dict[str, Any], model: ModelAdapter)
     layout = repair(source, preset_layout(source, target, understanding), target, understanding)
     preset = Candidate("preset", layout,
                        check(source, layout, target, understanding.roles, understanding.priorities))
-    if understanding.difficulty == "easy" and preset.report.passes:
+    easy = understanding.difficulty == "easy"
+    if easy and preset.report.passes:
+        decision = "easy and passes every rule: returned without the LLM"
+    elif easy:
+        decision = "easy but breaks a rule: promoted to hard"
+    else:
+        decision = "hard: the LLM lays it out from scratch"
+    record("preset", layout=preset.layout, report=preset.report.to_dict(), decision=decision)
+    if easy and preset.report.passes:
+        record("result", winner="preset", reason=decision, layout=preset.layout,
+               report=preset.report.to_dict())
         return preset.layout
 
-    if understanding.difficulty == "easy":
-        understanding.difficulty = "hard"  # promoted: its preset layout still breaks a rule
-    return run_check_loop(source, target, understanding, preset, model, budget).layout
+    understanding.difficulty = "hard"  # promoted, if it was easy
+    best = run_check_loop(source, target, understanding, preset, model, budget)
+    reason = ("no design attempt beat it" if best is preset
+              else "best design attempt by rule cost, then signals")
+    record("result", winner=best.name, reason=reason, layout=best.layout,
+           report=best.report.to_dict())
+    return best.layout
 
 
 def _safe_layout(source: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
