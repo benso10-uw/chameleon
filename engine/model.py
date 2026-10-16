@@ -86,7 +86,8 @@ class OpenAICompatibleModel:
         if self.max_tokens:
             payload["max_tokens"] = self.max_tokens
         body = json.dumps(payload).encode()
-        headers = {"Content-Type": "application/json"}
+        # Python's default User-Agent is blocked by some hosts' Cloudflare rules.
+        headers = {"Content-Type": "application/json", "User-Agent": "chameleon-engine/0.1"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         request = urllib.request.Request(f"{self.base_url}/chat/completions", data=body, headers=headers)
