@@ -4,7 +4,8 @@ The model choice waits on the organisers' approved list, so the backend is
 picked by environment variable and can be swapped without touching the rest
 of the engine:
 
-- CHAMELEON_LLM_BASE_URL + CHAMELEON_LLM_MODEL (+ CHAMELEON_LLM_API_KEY)
+- CHAMELEON_LLM_BASE_URL + CHAMELEON_LLM_MODEL (+ CHAMELEON_LLM_API_KEY,
+  CHAMELEON_LLM_MAX_TOKENS)
                                  an OpenAI-compatible chat API, e.g. a hosted
                                  model for development (not usable in the
                                  offline scoring container)
@@ -70,17 +71,21 @@ class OllamaModel:
 class OpenAICompatibleModel:
     """Deterministic chat completions from any OpenAI-compatible API."""
 
-    def __init__(self, model: str, base_url: str, api_key: str = "", timeout: float = 600):
+    def __init__(self, model: str, base_url: str, api_key: str = "", timeout: float = 600,
+                 max_tokens: int | None = None):
         self.model, self.base_url = model, base_url.rstrip("/")
-        self.api_key, self.timeout = api_key, timeout
+        self.api_key, self.timeout, self.max_tokens = api_key, timeout, max_tokens
 
     def complete(self, prompt: str) -> str:
-        body = json.dumps({
+        payload = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0,
             "seed": 0,
-        }).encode()
+        }
+        if self.max_tokens:
+            payload["max_tokens"] = self.max_tokens
+        body = json.dumps(payload).encode()
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -120,7 +125,9 @@ def default_model() -> ModelAdapter:
     load_env_file()
     base_url, model = os.environ.get("CHAMELEON_LLM_BASE_URL"), os.environ.get("CHAMELEON_LLM_MODEL")
     if base_url and model:
-        return OpenAICompatibleModel(model, base_url, os.environ.get("CHAMELEON_LLM_API_KEY", ""))
+        max_tokens = os.environ.get("CHAMELEON_LLM_MAX_TOKENS")
+        return OpenAICompatibleModel(model, base_url, os.environ.get("CHAMELEON_LLM_API_KEY", ""),
+                                     max_tokens=int(max_tokens) if max_tokens else None)
     name = os.environ.get("CHAMELEON_OLLAMA_MODEL")
     if name:
         return OllamaModel(name, os.environ.get("CHAMELEON_OLLAMA_HOST", "http://127.0.0.1:11434"))
