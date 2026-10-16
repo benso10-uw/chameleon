@@ -8,9 +8,11 @@ unreachable model ends the budget at once, since retrying can't help.
 
 import json
 import re
+import time
 from typing import Any, Callable, Optional, TypeVar
 
-from engine.model import ModelAdapter, ModelUnavailable
+from engine.model.model import ModelAdapter, ModelUnavailable
+from engine.tracing.trace import record
 
 T = TypeVar("T")
 
@@ -42,7 +44,7 @@ class LLMBudget:
 
 
 def ask_json(model: ModelAdapter, prompt: str, parse: Callable[[Any], T],
-             budget: LLMBudget) -> Optional[T]:
+             budget: LLMBudget, purpose: str = "") -> Optional[T]:
     """Ask until `parse` accepts the reply or the budget runs out."""
     mistake = None
     while not budget.exhausted:
@@ -50,22 +52,38 @@ def ask_json(model: ModelAdapter, prompt: str, parse: Callable[[Any], T],
         if mistake:
             full += (f"\n\nYour previous reply could not be used: {mistake}\n"
                      "Do not repeat this mistake. Reply with the JSON object only.")
+        started = time.perf_counter()
+        if hasattr(model, "last_call"):
+            model.last_call = None
+
+        def log(outcome, reply=None, error=None):
+            meta = getattr(model, "last_call", None) or {}
+            record("llm_call", purpose=purpose, outcome=outcome, prompt=full, reply=reply,
+                   error=error, reasoning=meta.get("reasoning"), usage=meta.get("usage"),
+                   model=meta.get("model"), finish_reason=meta.get("finish_reason"),
+                   seconds=round(time.perf_counter() - started, 2),
+                   failures={"consecutive": budget.consecutive, "total": budget.total})
+
         try:
             reply = model.complete(full)
-        except ModelUnavailable:
+        except ModelUnavailable as exc:
             budget.unavailable = True
+            log("unavailable", error=str(exc))
             return None
         except Exception as exc:  # a crashing backend is an LLM failure, not a design failure
             mistake = f"the model call failed ({exc})"
             budget.failed()
+            log("llm_failure", error=mistake)
             continue
         try:
             result = parse(_extract_json(reply))
         except UnusableReply as exc:
             mistake = str(exc)
             budget.failed()
+            log("llm_failure", reply=reply, error=mistake)
             continue
         budget.succeeded()
+        log("usable", reply=reply)
         return result
     return None
 

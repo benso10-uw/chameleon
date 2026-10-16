@@ -2,13 +2,13 @@
 
 This is the scaffolding for your engine. It handles input loading, output
 writing, rendering, and Docker packaging — so the only file you need to
-edit is **`engine/resize.py`**.
+edit is **`engine/resize/resize_logic.py`**.
 
 ```
 input:  a task JSON (source design + target canvas)
               |
               v
-        engine/resize.py   <-- YOU IMPLEMENT THIS
+        engine/resize/     <-- YOU IMPLEMENT THIS
               |
               v
 output: <task>_output.json  (schema-valid resized design)
@@ -21,8 +21,12 @@ Both the JSON and the PNG are what get evaluated — see `RULES.md`.
 
 ```
 engine/
-  resize.py        <- implement your approach here
   main.py           <- orchestrator (input -> resize() -> output). Don't need to edit this.
+  analyze/          <- breakdown, text measurement, roles/priorities/difficulty (understand)
+  resize/           <- resize_logic.py (the resize() entry point), preset, hard path, repair
+  check/            <- the checker: rules and signals for a layout
+  model/            <- model adapter and JSON asking with the failure budget
+  tracing/          <- per-task traces and the HTML trace report (python -m engine.tracing.trace_run)
 renderer/           <- the real renderer (transformer-convertor + cr-renderer), already vendored
 brand_kit/
   assets/           <- image files referenced by asset_id in the sample designs
@@ -50,7 +54,7 @@ approach (see the main brief: "a naive program stretches the picture; a
 good one moves the furniture"). It's there so the pipeline runs on day
 one. Run it once, look at `output/*_output.png`, and you'll see exactly
 why it's not good enough — that's the point. Replace the body of
-`resize()` in `engine/resize.py`, not just its constants.
+`resize()` in `engine/resize/resize_logic.py`, not just its constants.
 
 ## What the self-check does (and doesn't do)
 

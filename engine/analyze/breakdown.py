@@ -10,7 +10,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
-from engine.text_metrics import single_line_width
+from engine.analyze.text_metrics import single_line_width
 
 ROLES = ("background", "decoration", "logo", "product", "image", "headline", "subhead",
          "body", "legal", "cta", "badge", "label")

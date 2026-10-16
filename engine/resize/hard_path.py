@@ -13,12 +13,13 @@ import json
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from engine.breakdown import Understanding
-from engine.checker import ViolationReport, check
-from engine.llm import LLMBudget, UnusableReply, ask_json
-from engine.model import ModelAdapter
-from engine.repair import repair
-from engine.understand import element_facts
+from engine.analyze.breakdown import Understanding
+from engine.analyze.understand import element_facts
+from engine.check.checker import ViolationReport, check
+from engine.model.llm import LLMBudget, UnusableReply, ask_json
+from engine.model.model import ModelAdapter
+from engine.resize.repair import repair
+from engine.tracing.trace import record
 
 MAX_DESIGN_ATTEMPTS = 3
 COST_EPSILON = 1e-6
@@ -39,19 +40,30 @@ def run_check_loop(source: dict[str, Any], target: dict[str, Any], understanding
     previous: Optional[Candidate] = None
     for n in range(1, max_attempts + 1):
         prompt = _layout_prompt(source, target, understanding, previous)
-        layout = ask_json(model, prompt, lambda reply: _apply(source, target, reply), budget)
+        layout = ask_json(model, prompt, lambda reply: _apply(source, target, reply), budget,
+                          purpose=f"layout attempt {n}")
         if layout is None:
-            break  # LLM-failure budget spent or model unavailable
+            record("loop_end", reason="LLM-failure budget spent or model unavailable",
+                   attempts=n - 1)
+            break
         layout = repair(source, layout, target, understanding)
         attempt = Candidate(f"attempt {n}",
                             layout, check(source, layout, target, understanding.roles,
                                           understanding.priorities))
         improved = previous is None or _better(attempt, previous, model, budget)
-        if _better(attempt, best, model, budget):
+        new_best = _better(attempt, best, model, budget)
+        if new_best:
             best = attempt
+        record("attempt", name=attempt.name, layout=attempt.layout, report=attempt.report.to_dict(),
+               improved_on_previous=improved, new_best=new_best, best_so_far=best.name)
         if not improved:
+            record("loop_end", reason=f"{attempt.name} did not improve on the previous attempt",
+                   attempts=n)
             break
         previous = attempt
+    else:
+        record("loop_end", reason=f"reached the cap of {max_attempts} design attempts",
+               attempts=max_attempts)
     return best
 
 
@@ -62,9 +74,15 @@ def _better(a: Candidate, b: Candidate, model: ModelAdapter, budget: LLMBudget) 
     if a.report.rule_cost > b.report.rule_cost + COST_EPSILON:
         return False
     verdict = _llm_tie_break(a, b, model, budget)
-    if verdict is not None:
-        return verdict
-    return a.report.signal_cost < b.report.signal_cost - COST_EPSILON
+    decided_by = "llm"
+    if verdict is None:
+        verdict = a.report.signal_cost < b.report.signal_cost - COST_EPSILON
+        decided_by = ("signal cost (no usable LLM verdict)" if a.report.signals or b.report.signals
+                      else "no signals on either: keep the earlier")
+    record("tie_break", a=a.name, b=b.name, rule_cost=a.report.rule_cost,
+           signal_cost={a.name: a.report.signal_cost, b.name: b.report.signal_cost},
+           winner=a.name if verdict else b.name, decided_by=decided_by)
+    return verdict
 
 
 def _llm_tie_break(a: Candidate, b: Candidate, model: ModelAdapter, budget: LLMBudget) -> Optional[bool]:
@@ -86,7 +104,7 @@ Reply with JSON only: {{"better": "A" | "B"}}"""
             raise UnusableReply('reply must be {"better": "A"} or {"better": "B"}')
         return choice == "A"
 
-    return ask_json(model, prompt, parse, budget)
+    return ask_json(model, prompt, parse, budget, purpose=f"tie-break: {a.name} vs {b.name}")
 
 
 def _signal_summary(v) -> dict[str, Any]:

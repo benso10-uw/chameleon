@@ -8,8 +8,8 @@ check loop to report.
 import copy
 from typing import Any
 
-from engine.breakdown import Understanding, bbox, groups_of, text_floor, union
-from engine.text_metrics import measure_text
+from engine.analyze.breakdown import Understanding, bbox, groups_of, text_floor, union
+from engine.analyze.text_metrics import measure_text
 
 MAX_SHIFT_FRACTION = 0.03  # of the canvas dimension
 MIN_SHIFT_PX = 4.0

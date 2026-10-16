@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-from engine.checker import check
-from engine.model import ModelUnavailable, NoModel
+from engine.check.checker import check
+from engine.model.model import ModelUnavailable, NoModel
 from engine.resize import resize
 from tests.helpers import load_task
 
@@ -41,7 +41,7 @@ class FakeModel:
 
 def understanding_reply(source, difficulty):
     ids = [el["id"] for el in source["elements"]]
-    from engine.breakdown import infer_priorities, infer_roles
+    from engine.analyze.breakdown import infer_priorities, infer_roles
     roles = infer_roles(source)
     priorities = infer_priorities(source, roles)
     return json.dumps({"elements": [{"id": i, "role": roles[i], "priority": priorities[i]} for i in ids],

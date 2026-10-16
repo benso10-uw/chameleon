@@ -9,9 +9,10 @@ the preset logic can handle. If the LLM can't be used, the heuristics stand.
 import json
 from typing import Any
 
-from engine.breakdown import (ROLES, Understanding, infer_priorities, infer_roles, measure)
-from engine.llm import LLMBudget, UnusableReply, ask_json
-from engine.model import ModelAdapter
+from engine.analyze.breakdown import (ROLES, Understanding, infer_priorities, infer_roles, measure)
+from engine.model.llm import LLMBudget, UnusableReply, ask_json
+from engine.model.model import ModelAdapter
+from engine.tracing.trace import record
 
 HARD_PRESSURE = 0.6
 HEURISTIC_HARD_ASPECT_CHANGE = 2.0
@@ -53,13 +54,21 @@ def understand(source: dict[str, Any], target: dict[str, Any], model: ModelAdapt
         return Understanding(llm_roles, {i: n + 1 for n, i in enumerate(ranked)},
                              difficulty, measurements)
 
-    result = ask_json(model, _prompt(source, target, roles, priorities, measurements), parse, budget)
+    result = ask_json(model, _prompt(source, target, roles, priorities, measurements), parse, budget,
+                      purpose="understand")
+    decided_by = "llm" if result is not None else "heuristics"
     if result is None:
         hard = (measurements["aspect_change"] > HEURISTIC_HARD_ASPECT_CHANGE
                 or measurements["space_pressure"] > HEURISTIC_HARD_PRESSURE)
         result = Understanding(roles, priorities, "hard" if hard else "easy", measurements)
+    judged = result.difficulty
     if measurements["space_pressure"] > HARD_PRESSURE:
         result.difficulty = "hard"
+    record("understand", decided_by=decided_by, measurements=measurements,
+           heuristic_roles=roles, heuristic_priorities=priorities,
+           roles=result.roles, priorities=result.priorities,
+           judged_difficulty=judged, difficulty=result.difficulty,
+           pressure_override=judged != result.difficulty)
     return result
 
 
