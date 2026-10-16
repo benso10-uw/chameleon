@@ -18,21 +18,24 @@ import json
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
 _current: contextvars.ContextVar[Optional["Trace"]] = contextvars.ContextVar("chameleon_trace",
                                                                            default=None)
 
 
 class Trace:
-    def __init__(self, task: str = ""):
+    def __init__(self, task: str = "", on_step: Optional[Callable] = None):
         self.task = task
         self.steps: list[dict[str, Any]] = []
         self._started = time.perf_counter()
+        self.on_step = on_step
 
     def add(self, kind: str, **data: Any) -> None:
         elapsed = round(time.perf_counter() - self._started, 3)
         self.steps.append({"kind": kind, "at_seconds": elapsed, **copy.deepcopy(data)})
+        if self.on_step is not None:
+            self.on_step(self.steps[-1])
 
     def to_dict(self) -> dict[str, Any]:
         return {"task": self.task, "steps": self.steps}

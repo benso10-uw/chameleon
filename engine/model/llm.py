@@ -53,6 +53,8 @@ def ask_json(model: ModelAdapter, prompt: str, parse: Callable[[Any], T],
             full += (f"\n\nYour previous reply could not be used: {mistake}\n"
                      "Do not repeat this mistake. Reply with the JSON object only.")
         started = time.perf_counter()
+        record("llm_start", purpose=purpose, model=getattr(model, "model", "none"),
+               request_number=budget.total + 1)
         if hasattr(model, "last_call"):
             model.last_call = None
 
@@ -75,6 +77,23 @@ def ask_json(model: ModelAdapter, prompt: str, parse: Callable[[Any], T],
             budget.failed()
             log("llm_failure", error=mistake)
             continue
+        meta = getattr(model, "last_call", None) or {}
+        if str(meta.get("finish_reason", "")).lower() in ("length", "max_tokens"):
+            budget.failed()
+            recover = getattr(model, "recover_truncation", None)
+            recovered = bool(recover and recover())
+            error = ("Reply hit the token limit before a complete answer. Retrying once with "
+                     "Qwen thinking disabled and at least 8192 output tokens." if recovered else
+                     "Reply hit the token limit before a complete answer. Stopped to avoid repeating "
+                     "the same request. Choose reasoning off/minimal/low or increase the reply token cap.")
+            log("llm_failure", reply=reply, error=error)
+            record("model_recovery", recovered=recovered, reason=error,
+                   reasoning=getattr(model, "reasoning", None), max_tokens=getattr(model, "max_tokens", None))
+            if recovered:
+                mistake = "Return a compact, complete JSON answer directly. Your previous output was truncated."
+                continue
+            budget.unavailable = True
+            return None
         try:
             result = parse(_extract_json(reply))
         except UnusableReply as exc:

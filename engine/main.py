@@ -12,6 +12,7 @@ manual steps in between.
 """
 
 import json
+import argparse
 import sys
 import time
 from pathlib import Path
@@ -105,26 +106,36 @@ def _fallback_render(design: dict, png_path: Path) -> None:
     img.save(png_path)
 
 
-def main() -> int:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    task_files = sorted(INPUT_DIR.glob("*.json"))
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description="Resize all samples, or just the task JSON files you choose.")
+    parser.add_argument("tasks", nargs="*", type=Path)
+    parser.add_argument("--no-model", action="store_true", help="Use deterministic layout logic without API calls")
+    parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
+    args = parser.parse_args(argv)
+    output_dir = args.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    task_files = args.tasks or sorted(INPUT_DIR.glob("*.json"))
     if not task_files:
         print(f"No task files found in {INPUT_DIR}", file=sys.stderr)
         return 1
 
     exit_code = 0
     for task_path in task_files:
-        task = json.loads(task_path.read_text())
+        task = json.loads(task_path.read_text(encoding="utf-8-sig"))
         source, target_canvas = task["source"], task["target_canvas"]
 
         t0 = time.time()
-        output = resize(source, target_canvas)
+        if args.no_model:
+            from engine.model.model import NoModel
+            output = resize(source, target_canvas, model=NoModel())
+        else:
+            output = resize(source, target_canvas)
         elapsed = time.time() - t0
 
         problems = self_check(source, output)
         stem = task_path.stem
-        (OUTPUT_DIR / f"{stem}_output.json").write_text(json.dumps(output, indent=2))
-        render_to_png(output, ASSETS_DIR, OUTPUT_DIR / f"{stem}_output.png")
+        (output_dir / f"{stem}_output.json").write_text(json.dumps(output, indent=2), encoding="utf-8")
+        render_to_png(output, ASSETS_DIR, output_dir / f"{stem}_output.png")
 
         status = "OK" if not problems else f"{len(problems)} self-check warning(s)"
         print(f"[{task_path.name}] {status} in {elapsed:.2f}s "

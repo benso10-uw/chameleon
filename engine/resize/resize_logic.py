@@ -23,7 +23,7 @@ from engine.analyze.breakdown import infer_roles
 from engine.analyze.understand import understand
 from engine.check.checker import check
 from engine.model.llm import LLMBudget
-from engine.model.model import ModelAdapter, default_model
+from engine.model.model import ModelAdapter, NoModel, default_model
 from engine.resize.hard_path import Candidate, run_check_loop
 from engine.resize.preset import preset_layout
 from engine.resize.repair import repair
@@ -31,12 +31,15 @@ from engine.tracing.trace import Trace, record, tracing
 
 
 def resize(source: dict[str, Any], target_canvas: dict[str, Any],
-           model: Optional[ModelAdapter] = None, trace: Optional[Trace] = None) -> dict[str, Any]:
+           model: Optional[ModelAdapter] = None, trace: Optional[Trace] = None, *,
+           use_model_understanding: bool = True, refine: bool = False,
+           max_attempts: int = 3, llm_tiebreak: bool = True) -> dict[str, Any]:
     """`trace`, if given, receives a record of every step (see engine/tracing/trace.py)."""
     target = {"width": target_canvas["width"], "height": target_canvas["height"]}
     with tracing(trace):
         try:
-            return _resize(source, target, model or default_model())
+            return _resize(source, target, model or default_model(), use_model_understanding,
+                           refine, max_attempts, llm_tiebreak)
         except Exception as exc:
             # Never let one design take the whole run down.
             record("error", error=repr(exc), traceback=traceback.format_exc())
@@ -46,14 +49,17 @@ def resize(source: dict[str, Any], target_canvas: dict[str, Any],
             return layout
 
 
-def _resize(source: dict[str, Any], target: dict[str, Any], model: ModelAdapter) -> dict[str, Any]:
+def _resize(source: dict[str, Any], target: dict[str, Any], model: ModelAdapter,
+            use_model_understanding=True, refine=False, max_attempts=3, llm_tiebreak=True) -> dict[str, Any]:
     budget = LLMBudget()
-    understanding = understand(source, target, model, budget)
+    if isinstance(model, NoModel):
+        budget.unavailable = True
+    understanding = understand(source, target, model, budget, use_model=use_model_understanding)
 
     layout = repair(source, preset_layout(source, target, understanding), target, understanding)
     preset = Candidate("preset", layout,
                        check(source, layout, target, understanding.roles, understanding.priorities))
-    easy = understanding.difficulty == "easy"
+    easy = understanding.difficulty == "easy" and not refine
     if easy and preset.report.passes:
         decision = "easy and passes every rule: returned without the LLM"
     elif easy:
@@ -67,7 +73,8 @@ def _resize(source: dict[str, Any], target: dict[str, Any], model: ModelAdapter)
         return preset.layout
 
     understanding.difficulty = "hard"  # promoted, if it was easy
-    best = run_check_loop(source, target, understanding, preset, model, budget)
+    best = run_check_loop(source, target, understanding, preset, model, budget,
+                          max_attempts=max_attempts, llm_tiebreak=llm_tiebreak)
     reason = ("no design attempt beat it" if best is preset
               else "best design attempt by rule cost, then signals")
     record("result", winner=best.name, reason=reason, layout=best.layout,

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chameleon · Design workbench</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header><a class="brand" href="/" aria-label="Chameleon home"><span class="brand-mark">c</span> chameleon<span class="brand-sub">/ workbench</span></a><span class="local"><span></span> LOCAL SESSION</span></header>
+<div class="shell">
+<aside>
+ <div class="section-title">01 <span>Choose a design</span></div>
+ <label for="task">Sample or imported task</label><select id="task"></select>
+ <label class="upload" for="upload">＋ Import task JSON</label><input id="upload" type="file" accept=".json,application/json" hidden>
+ <p class="hint">Use a design task with editable elements. Images and fonts come from brand_kit.</p>
+ <div class="dimensions"><label>Target width<input id="width" type="number" min="1" max="8192" value="728"></label><span>×</span><label>Height<input id="height" type="number" min="1" max="8192" value="90"></label></div>
+ <div class="section-title">02 <span>Choose a model</span></div>
+ <label for="provider">Provider</label><select id="provider"><option value="preset">Preset only · no API calls</option><option value="gemini">Google AI Studio · Gemini</option><option value="openai">OpenAI-compatible API</option><option value="ollama">Local Ollama</option></select>
+ <div id="model-settings" hidden>
+  <label for="model">Model</label><input id="model" list="model-list" placeholder="Enter model ID"><datalist id="model-list"></datalist>
+  <button id="refresh-models" class="subtle" type="button">↻ Fetch Gemini models</button>
+  <div id="url-field" hidden><label for="base-url">API base URL</label><input id="base-url" type="url" placeholder="https://provider.example/v1"></div>
+  <div id="key-field"><label for="api-key">API key <span id="key-state"></span></label><input id="api-key" type="password" autocomplete="off" placeholder="Use saved key or enter another"><p class="hint">Sent to the local server for this request. Never saved by this form.</p></div>
+  <label for="reasoning">Reasoning</label><select id="reasoning"><option value="low">Low · start here</option><option value="minimal">Minimal · supported Gemini models</option><option value="off">Off · supported models only</option><option value="auto">Provider default</option><option value="high">High · slower</option></select>
+  <p id="reasoning-note" class="hint"></p>
+ </div>
+ <details class="settings"><summary>Run settings</summary>
+  <label for="attempts">Design attempts</label><select id="attempts"><option>1</option><option selected>2</option><option>3</option></select>
+  <label for="tokens">Reply token cap</label><input id="tokens" type="number" min="512" max="32768" value="4096">
+  <label for="timeout">Request timeout (seconds)</label><input id="timeout" type="number" min="10" max="180" value="90">
+  <label class="check"><input id="refine" type="checkbox" checked> Ask the model to refine easy designs</label>
+  <label class="check"><input id="understanding" type="checkbox"> Use the model to assign roles</label>
+  <label class="check"><input id="tiebreak" type="checkbox"> Use the model to judge ties</label>
+ </details>
+ <div class="section-title">03 <span>Previous runs</span></div><button id="refresh-history" class="subtle" type="button">↻ Refresh history</button><div id="history"></div>
+</aside>
+<main>
+ <div class="workspace-heading"><div><p class="eyebrow">DESIGN / INSPECT / ITERATE</p><h1 id="title">Your design, in a new shape.</h1></div><div class="run-actions"><span id="state" class="tag">Ready</span><button id="run" class="primary" type="button">Run selected design <span>↗</span></button><button id="cancel" class="subtle" type="button" hidden>Stop after current request</button></div></div>
+ <p id="message" role="status" aria-live="polite"></p>
+ <div id="warnings" role="status"></div>
+ <section class="previews" aria-label="Design comparison">
+  <article class="preview source"><div class="preview-head"><h2>Source design</h2><span id="source-size"></span></div><div class="image-stage"><img id="source-image" alt="Source design preview" hidden><p id="source-empty">Select a sample to begin.</p></div></article>
+  <article class="preview result"><div class="preview-head"><h2 id="result-title">Target canvas</h2><span id="target-size"></span></div><div class="image-stage"><img id="result-image" alt="Selected layout preview" hidden><p id="result-empty">Run a design or open a saved trace.</p></div><div id="result-foot"></div></article>
+ </section>
+ <div id="candidates" class="candidates" aria-label="Layout candidates"></div>
+ <section class="trace-section"><div class="trace-heading"><div><p class="eyebrow">WHAT HAPPENED</p><h2>Run trace <span id="live-dot" hidden>● LIVE</span></h2></div><div id="downloads"></div></div>
+  <div id="metrics" class="metrics"><div><strong>—</strong><span>elapsed</span></div><div><strong>—</strong><span>model calls</span></div><div><strong>—</strong><span>reasoning tokens</span></div><div><strong>—</strong><span>rule violations</span></div></div>
+  <div id="insight" class="insight" hidden></div>
+  <div class="trace-tools"><label class="check"><input id="show-details" type="checkbox"> Show prompts and raw replies</label><span>Newest steps appear at the bottom</span></div>
+  <div id="timeline" class="timeline"><p class="empty">Your run will appear here, one step at a time.</p></div>
+ </section>
+</main></div>
+<footer>Chameleon workbench <span>Rule checks measure validity. Inspect the image to judge design quality.</span></footer>
+</body></html>

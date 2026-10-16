@@ -296,6 +296,8 @@ def _strip(blocks: list[Block], area, gap, roles, placed, src_canvas) -> None:
     stacked; all standalone text shares one cell, given the width it needs.
     Rigid cells squeeze (towards their readability floor) until the text
     fits; floors relax only when nothing else works."""
+    if _compact_strip(blocks, area, roles, placed):
+        return
     aw, ah = area[2] - area[0], area[3] - area[1]
     texts = sorted((b for b in blocks if b.kind == "text"), key=lambda b: (b.box[1], b.box[0]))
     rigid = sorted((b for b in blocks if b.kind == "rigid"), key=lambda b: (b.box[1] + b.box[3]) / 2)
@@ -377,6 +379,93 @@ def _strip(blocks: list[Block], area, gap, roles, placed, src_canvas) -> None:
             _place_rigid(b, s, x + (w - b.width * s) / 2, y, placed)
             y += b.height * s + inner_gap
         x += w + gap
+
+
+def _compact_strip(blocks, area, roles, placed):
+    """Dense banners: give copy the width, and put groups on a separate rail.
+
+    The old one-cell-per-block row starved long copy of width. This arrangement
+    is tried only for multiple grouped badges, with every group kept rigid.
+    """
+    grouped = [b for b in blocks if b.kind == "rigid" and any(m.get("group_id") for m in b.members)]
+    images = [b for b in blocks if b.kind == "rigid" and b not in grouped]
+    texts = [b for b in blocks if b.kind == "text"]
+    if len(grouped) < 3 or not texts or any(len(b.members) != 1 for b in images):
+        return False
+    aw, ah = area[2] - area[0], area[3] - area[1]
+    gutter = max(2.0, min(5.0, ah * .024))
+    brand_w = min(aw * .115, ah * 1.05) if images else 0
+    x0 = area[0] + brand_w + (gutter if images else 0)
+    copy_w = area[2] - x0
+    scales = [max((6 / m["font_size"] for m in b.texts), default=.2) for b in grouped]
+    min_width = sum(b.width * s for b, s in zip(grouped, scales)) + gutter * (len(grouped)-1)
+    if min_width > copy_w:
+        return False
+    # Spend remaining width on the action first, keeping the small badge rail compact.
+    extra = copy_w - min_width
+    for i in sorted(range(len(grouped)), key=lambda i: grouped[i].priority):
+        b = grouped[i]
+        if not any(roles.get(m["id"]) == "cta" for m in b.members):
+            continue
+        desired = min(ah * .43 / max(b.height, 1), max(scales[i], .65))
+        grow = min(extra / max(b.width, 1), max(0, desired-scales[i]))
+        scales[i] += grow
+        extra -= grow*b.width
+    rail_h = max(b.height*s for b, s in zip(grouped, scales))
+    legal = [b for b in texts if roles.get(b.members[0]["id"]) == "legal"]
+    copy_blocks = [b for b in texts if b not in legal]
+    legal_heights = [measure_text(b.members[0], font_size=6, width=copy_w).height for b in legal]
+    legal_h = sum(legal_heights) + gutter * max(0, len(legal)-1)
+    copy_h = ah - rail_h - gutter - (legal_h+gutter if legal else 0)
+    sizes = [6.0 for _ in copy_blocks]
+    def height_total():
+        return sum(measure_text(b.members[0], font_size=s, width=copy_w).height
+                   for b, s in zip(copy_blocks, sizes)) + gutter*max(0,len(copy_blocks)-1)
+    if not copy_blocks or height_total() > copy_h:
+        return False
+    # Allocate space by message priority instead of shrinking all copy uniformly.
+    for i in sorted(range(len(copy_blocks)), key=lambda i: copy_blocks[i].priority):
+        b = copy_blocks[i]
+        lo, hi = 6.0, min(b.members[0]["font_size"], ah*.32)
+        for _ in range(24):
+            mid = (lo+hi)/2
+            sizes[i] = mid
+            if height_total() <= copy_h:
+                lo = mid
+            else:
+                hi = mid
+        sizes[i] = max(6.0, int(lo*100)/100)
+    candidate = {}
+    y = area[1]
+    for b, size in zip(copy_blocks, sizes):
+        el = b.members[0]
+        h = measure_text(el, font_size=size, width=copy_w).height
+        candidate[el["id"]] = _rounded({**el, "x": x0, "y": y, "width": copy_w, "height": h, "font_size": size})
+        y += h+gutter
+    rail_y = area[3] - rail_h - (legal_h+gutter if legal else 0)
+    x = x0
+    for b,s in zip(grouped,scales):
+        _place_rigid(b,s,x,rail_y+(rail_h-b.height*s)/2,candidate)
+        x += b.width*s+gutter
+    y = area[3]-legal_h
+    for b,h in zip(legal,legal_heights):
+        el = b.members[0]
+        candidate[el["id"]] = _rounded({**el,"x":x0,"y":y,"width":copy_w,"height":h,"font_size":6})
+        y += h+gutter
+    # Brand and product get a small vertical rail; secondary images stay present.
+    images.sort(key=lambda b: (0 if roles.get(b.members[0]["id"]) == "logo" else 1, b.priority))
+    y = area[1]
+    remaining = ah-gutter*max(0,len(images)-1)
+    for i,b in enumerate(images):
+        role=roles.get(b.members[0]["id"])
+        reserve = sum(min(12.0, remaining/max(len(images),1)) for _ in images[i+1:])
+        desired = brand_w*b.height/max(b.width,1)
+        h = min(desired, max(1, remaining-reserve))
+        _fit_rigid(b,(area[0],y,area[0]+brand_w,y+h),candidate,cap=None)
+        y += h+gutter
+        remaining -= h
+    placed.update(candidate)
+    return True
 
 
 def _column_fits(blocks: list[Block], aw: float, ah: float, roles, scale: float,

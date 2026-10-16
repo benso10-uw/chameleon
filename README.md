@@ -1,5 +1,10 @@
 # CHAMELEON — starter repo
 
+For single-design testing, model selection and live traces, double-click
+`start-workbench.cmd`, or run `python -m engine.workbench --open-browser`.
+See [the workbench guide](docs/WORKBENCH.md) and
+[quality/speed results](docs/QUALITY-AND-SPEED.md).
+
 This is the scaffolding for your engine. It handles input loading, output
 writing, rendering, and Docker packaging — so the only file you need to
 edit is **`engine/resize/resize_logic.py`**.

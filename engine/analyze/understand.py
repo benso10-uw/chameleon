@@ -21,7 +21,7 @@ _TEXT_PREVIEW = 160
 
 
 def understand(source: dict[str, Any], target: dict[str, Any], model: ModelAdapter,
-               budget: LLMBudget) -> Understanding:
+               budget: LLMBudget, use_model: bool = True) -> Understanding:
     roles = infer_roles(source)
     priorities = infer_priorities(source, roles)
     measurements = measure(source, target, roles)
@@ -54,8 +54,8 @@ def understand(source: dict[str, Any], target: dict[str, Any], model: ModelAdapt
         return Understanding(llm_roles, {i: n + 1 for n, i in enumerate(ranked)},
                              difficulty, measurements)
 
-    result = ask_json(model, _prompt(source, target, roles, priorities, measurements), parse, budget,
-                      purpose="understand")
+    result = (ask_json(model, _prompt(source, target, roles, priorities, measurements), parse, budget,
+                       purpose="understand") if use_model else None)
     decided_by = "llm" if result is not None else "heuristics"
     if result is None:
         hard = (measurements["aspect_change"] > HEURISTIC_HARD_ASPECT_CHANGE

@@ -78,10 +78,21 @@ class OpenAICompatibleModel:
     """Deterministic chat completions from any OpenAI-compatible API."""
 
     def __init__(self, model: str, base_url: str, api_key: str = "", timeout: float = 600,
-                 max_tokens: int | None = None):
+                 max_tokens: int | None = None, reasoning: str = "auto"):
         self.model, self.base_url = model, base_url.rstrip("/")
         self.api_key, self.timeout, self.max_tokens = api_key, timeout, max_tokens
         self.last_call = None
+        self.reasoning = reasoning
+        self._truncation_recovered = False
+
+    def recover_truncation(self) -> bool:
+        """One bounded recovery; never repeat a reasoning-starved request unchanged."""
+        if self._truncation_recovered or "qwen" not in self.model.lower():
+            return False
+        self._truncation_recovered = True
+        self.reasoning = "off"
+        self.max_tokens = max(self.max_tokens or 0, 8192)
+        return True
 
     def complete(self, prompt: str) -> str:
         payload = {
@@ -92,6 +103,11 @@ class OpenAICompatibleModel:
         }
         if self.max_tokens:
             payload["max_tokens"] = self.max_tokens
+        if self.reasoning != "auto":
+            if "qwen" in self.model.lower():
+                payload["chat_template_kwargs"] = {"enable_thinking": self.reasoning != "off"}
+            else:
+                payload["reasoning_effort"] = "none" if self.reasoning == "off" else self.reasoning
         body = json.dumps(payload).encode()
         # Python's default User-Agent is blocked by some hosts' Cloudflare rules.
         headers = {"Content-Type": "application/json", "User-Agent": "chameleon-engine/0.1"}
@@ -103,8 +119,10 @@ class OpenAICompatibleModel:
                 reply = json.loads(response.read())
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")[:300]
-            if exc.code in (401, 403, 404):
-                raise ModelUnavailable(f"{self.base_url} refused the request ({exc.code}): {detail}") from exc
+            if self.api_key:
+                detail = detail.replace(self.api_key, "[redacted]")
+            if exc.code in (401, 403, 404, 408, 429, 502, 503, 504, 524):
+                raise ModelUnavailable(f"Model request unavailable (HTTP {exc.code}); check credentials, quota or provider availability.") from None
             raise RuntimeError(f"{self.base_url} returned {exc.code}: {detail}") from exc  # retried
         except OSError as exc:
             raise ModelUnavailable(f"{self.base_url} unreachable: {exc}") from exc
@@ -123,7 +141,7 @@ def load_env_file(path: Path = ENV_FILE) -> None:
     overriding variables that are already set."""
     if not path.is_file():
         return
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
