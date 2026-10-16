@@ -1,11 +1,11 @@
 """Run tasks with tracing on and build an HTML report of every step.
 
-    python -m engine.trace_run                     # every task in input/
-    python -m engine.trace_run input/foo.json      # just these
-    python -m engine.trace_run --no-model          # preset logic only
+    python -m engine.tracing.trace_run                     # every task in input/
+    python -m engine.tracing.trace_run input/foo.json      # just these
+    python -m engine.tracing.trace_run --no-model          # preset logic only
 
 Writes to output/traces/:
-    <task>.json          the raw trace (see engine/trace.py)
+    <task>.json          the raw trace (see engine/tracing/trace.py)
     <task>/*.png         renders of the source, preset layout, each attempt
     index.html           the report: open it in a browser
 """
@@ -17,9 +17,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from engine.model import NoModel, default_model
+from engine.model.model import NoModel, default_model
 from engine.resize import resize
-from engine.trace import Trace
+from engine.tracing.trace import Trace
 
 INPUT_DIR = Path("input")
 TRACE_DIR = Path("output") / "traces"

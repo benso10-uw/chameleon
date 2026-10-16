@@ -26,7 +26,7 @@ import urllib.request
 from pathlib import Path
 from typing import Protocol
 
-ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
 class ModelUnavailable(Exception):

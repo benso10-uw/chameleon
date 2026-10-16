@@ -13,13 +13,13 @@ import json
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from engine.breakdown import Understanding
-from engine.checker import ViolationReport, check
-from engine.llm import LLMBudget, UnusableReply, ask_json
-from engine.model import ModelAdapter
-from engine.repair import repair
-from engine.trace import record
-from engine.understand import element_facts
+from engine.analyze.breakdown import Understanding
+from engine.analyze.understand import element_facts
+from engine.check.checker import ViolationReport, check
+from engine.model.llm import LLMBudget, UnusableReply, ask_json
+from engine.model.model import ModelAdapter
+from engine.resize.repair import repair
+from engine.tracing.trace import record
 
 MAX_DESIGN_ATTEMPTS = 3
 COST_EPSILON = 1e-6

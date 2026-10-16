@@ -10,9 +10,9 @@ import math
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
 
-from engine.breakdown import (LAYERING_ROLES, bbox, groups_of, infer_priorities, infer_roles,
+from engine.analyze.breakdown import (LAYERING_ROLES, bbox, groups_of, infer_priorities, infer_roles,
                               intersection_area, text_floor, union)
-from engine.text_metrics import measure_text
+from engine.analyze.text_metrics import measure_text
 
 REQUIRED_COMMON = ("id", "type", "x", "y", "width", "height")
 REQUIRED_BY_TYPE = {

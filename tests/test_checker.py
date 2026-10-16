@@ -1,6 +1,6 @@
 import copy
 
-from engine.checker import check
+from engine.check.checker import check
 from tests.helpers import load_task
 
 SQUARE = {"width": 1080, "height": 1080}

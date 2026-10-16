@@ -19,20 +19,20 @@ import copy
 import traceback
 from typing import Any, Optional
 
-from engine.breakdown import infer_roles
-from engine.checker import check
-from engine.hard_path import Candidate, run_check_loop
-from engine.llm import LLMBudget
-from engine.model import ModelAdapter, default_model
-from engine.preset import preset_layout
-from engine.repair import repair
-from engine.trace import Trace, record, tracing
-from engine.understand import understand
+from engine.analyze.breakdown import infer_roles
+from engine.analyze.understand import understand
+from engine.check.checker import check
+from engine.model.llm import LLMBudget
+from engine.model.model import ModelAdapter, default_model
+from engine.resize.hard_path import Candidate, run_check_loop
+from engine.resize.preset import preset_layout
+from engine.resize.repair import repair
+from engine.tracing.trace import Trace, record, tracing
 
 
 def resize(source: dict[str, Any], target_canvas: dict[str, Any],
            model: Optional[ModelAdapter] = None, trace: Optional[Trace] = None) -> dict[str, Any]:
-    """`trace`, if given, receives a record of every step (see engine/trace.py)."""
+    """`trace`, if given, receives a record of every step (see engine/tracing/trace.py)."""
     target = {"width": target_canvas["width"], "height": target_canvas["height"]}
     with tracing(trace):
         try:

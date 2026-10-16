@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
-FONTS_DIR = Path(__file__).resolve().parent.parent / "brand_kit" / "fonts"
+FONTS_DIR = Path(__file__).resolve().parents[2] / "brand_kit" / "fonts"
 DEFAULT_LINE_HEIGHT = 1.2
 _FALLBACK_CHAR_WIDTH = 0.55  # em, used only when real fonts are unavailable
 

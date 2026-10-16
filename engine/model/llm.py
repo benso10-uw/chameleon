@@ -11,8 +11,8 @@ import re
 import time
 from typing import Any, Callable, Optional, TypeVar
 
-from engine.model import ModelAdapter, ModelUnavailable
-from engine.trace import record
+from engine.model.model import ModelAdapter, ModelUnavailable
+from engine.tracing.trace import record
 
 T = TypeVar("T")
 

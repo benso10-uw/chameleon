@@ -19,8 +19,8 @@ import copy
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from engine.breakdown import LAYERING_ROLES, Understanding, bbox, text_floor, union
-from engine.text_metrics import measure_text
+from engine.analyze.breakdown import LAYERING_ROLES, Understanding, bbox, text_floor, union
+from engine.analyze.text_metrics import measure_text
 
 WIDE_ASPECT = 1.4
 STRIP_ASPECT = 4.5

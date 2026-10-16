@@ -9,10 +9,10 @@ the preset logic can handle. If the LLM can't be used, the heuristics stand.
 import json
 from typing import Any
 
-from engine.breakdown import (ROLES, Understanding, infer_priorities, infer_roles, measure)
-from engine.llm import LLMBudget, UnusableReply, ask_json
-from engine.model import ModelAdapter
-from engine.trace import record
+from engine.analyze.breakdown import (ROLES, Understanding, infer_priorities, infer_roles, measure)
+from engine.model.llm import LLMBudget, UnusableReply, ask_json
+from engine.model.model import ModelAdapter
+from engine.tracing.trace import record
 
 HARD_PRESSURE = 0.6
 HEURISTIC_HARD_ASPECT_CHANGE = 2.0
