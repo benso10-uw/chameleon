@@ -56,11 +56,12 @@ def test_zero_opacity_is_a_rule():
     assert "invisible" in kinds(report.rules)
 
 
-def test_off_canvas_is_a_rule_and_source_bleed_counts():
+def test_off_canvas_is_a_signal_and_source_bleed_counts():
     source = core_source()
     report = check(source, layout_of(source), SQUARE)
-    off = [v for v in report.rules if v.kind == "off_canvas"]
+    off = [v for v in report.signals if v.kind == "off_canvas"]
     assert [v.element_id for v in off] == ["deco_circle_1"]
+    assert report.passes  # a signal never rejects a layout
 
 
 def test_rotation_is_included_in_off_canvas_bounds():
@@ -71,7 +72,7 @@ def test_rotation_is_included_in_off_canvas_bounds():
     for el in ribbon:  # unrotated these would just touch the right edge
         el["x"] += canvas["width"] - (ribbon[0]["x"] + ribbon[0]["width"])
     report = check(source, layout, canvas)
-    assert "ribbon_bg" in {v.element_id for v in report.rules if v.kind == "off_canvas"}
+    assert "ribbon_bg" in {v.element_id for v in report.signals if v.kind == "off_canvas"}
 
 
 def test_image_proportion_tolerance_and_cover_exemption():
@@ -148,7 +149,7 @@ def test_violations_carry_priority_and_displacement():
     source = core_source()
     layout = in_canvas(source)
     element(layout, "product")["x"] = 2000
-    off = next(v for v in check(source, layout, SQUARE).rules if v.kind == "off_canvas")
+    off = next(v for v in check(source, layout, SQUARE).signals if v.kind == "off_canvas")
     assert off.priority is not None and off.displacement > 0.5
 
 

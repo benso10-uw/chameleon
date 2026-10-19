@@ -37,8 +37,16 @@ What an element is for in the design (headline, logo, product, CTA, decoration, 
 _Avoid_: label, category, type (type is text/image/shape)
 
 **Priority**:
-How much an element matters to the design's message; decides who gets space when the target canvas is tight.
+How much an element matters to the design's message; decides who gets space when the target canvas is tight. Headlines, QR codes and dates rank above other content.
 _Avoid_: importance, weight
+
+**Design analysis**:
+The structured account of how a source design works: palette and colour scheme, composition pattern (and the one suggested for the target canvas), a short description, the reason behind each priority, relationships between elements, and code-measured technical facts. Made by one LLM call that is shown the rendered design when possible.
+_Avoid_: understanding (the wider step), breakdown (the code facts)
+
+**Composition pattern**:
+How a design arranges visual weight and directs the eye (centred, asymmetrical focal, Z-pattern, split-screen…). Layouts adapt the pattern to the target canvas rather than copy coordinates.
+_Avoid_: design pattern, template
 
 ### Producing
 
@@ -49,11 +57,11 @@ _Avoid_: formation, arrangement
 ### Checking
 
 **Rule**:
-A requirement every returned layout must satisfy: every element present exactly once and still visible, required fields intact, nothing off the target canvas, images in proportion, groups intact, and text fitting its box at 6px or more.
+A requirement every returned layout must satisfy: every element present exactly once and still visible, required fields intact, images in proportion, groups intact, and text fitting its box at 6px or more.
 _Avoid_: hard check, constraint
 
 **Signal**:
-A quality observation about a layout (unintended overlap, readability, alignment, prominence, space use) that informs judgement but never rejects a layout on its own.
+A quality observation about a layout (an element reaching off the target canvas, unintended overlap, readability, alignment, prominence, space use) that informs judgement but never rejects a layout on its own.
 _Avoid_: score, soft check
 
 **Preset layout**:
@@ -75,6 +83,10 @@ _Avoid_: retry loop, evaluation loop
 **Design attempt**:
 One usable layout returned by the LLM within the check loop; counts toward the attempt cap.
 _Avoid_: iteration, try
+
+**Rationale**:
+The LLM's own account of a design attempt, extracted from its reply: the pattern it used, a justification for each element and group, and a summary of the new design. The next attempt reads it back to improve on it.
+_Avoid_: explanation, notes
 
 **LLM failure**:
 A reply that cannot be used as a layout at all (unparseable, or missing/extra element ids); retried with the mistake quoted back, and counted against its own budget rather than the attempt cap.

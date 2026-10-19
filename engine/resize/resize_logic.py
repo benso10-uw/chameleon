@@ -7,8 +7,10 @@ the Dockerfile) is plumbing so you can focus on exactly one function:
 
 The engine follows ADR-0001 (docs/adr/0001-llm-generates-hard-layouts.md):
 
-1. Understand — code breaks the design down and measures it; the LLM
-   assigns roles, priorities and difficulty (heuristics if it can't).
+1. Understand — code breaks the design down and measures it; one design-
+   analysis LLM call (shown the rendered design when possible) explains
+   colours, pattern and intent and assigns roles, priorities and difficulty
+   (heuristics if it can't).
 2. Lay out — easy designs get the preset layout; hard designs, and easy
    ones whose preset layout still breaks a rule, go to the LLM.
 3. Check loop — the LLM's attempts are checked, reported back and ranked;
@@ -33,13 +35,16 @@ from engine.tracing.trace import Trace, record, tracing
 def resize(source: dict[str, Any], target_canvas: dict[str, Any],
            model: Optional[ModelAdapter] = None, trace: Optional[Trace] = None, *,
            use_model_understanding: bool = True, refine: bool = False,
-           max_attempts: int = 3, llm_tiebreak: bool = True) -> dict[str, Any]:
-    """`trace`, if given, receives a record of every step (see engine/tracing/trace.py)."""
+           max_attempts: int = 3, llm_tiebreak: bool = True,
+           source_image: Optional[bytes] = None) -> dict[str, Any]:
+    """`trace`, if given, receives a record of every step (see engine/tracing/trace.py).
+    `source_image`, if given, is the source design already rendered to PNG; otherwise
+    design analysis renders it when the model accepts images."""
     target = {"width": target_canvas["width"], "height": target_canvas["height"]}
     with tracing(trace):
         try:
             return _resize(source, target, model or default_model(), use_model_understanding,
-                           refine, max_attempts, llm_tiebreak)
+                           refine, max_attempts, llm_tiebreak, source_image)
         except Exception as exc:
             # Never let one design take the whole run down.
             record("error", error=repr(exc), traceback=traceback.format_exc())
@@ -50,11 +55,13 @@ def resize(source: dict[str, Any], target_canvas: dict[str, Any],
 
 
 def _resize(source: dict[str, Any], target: dict[str, Any], model: ModelAdapter,
-            use_model_understanding=True, refine=False, max_attempts=3, llm_tiebreak=True) -> dict[str, Any]:
+            use_model_understanding=True, refine=False, max_attempts=3, llm_tiebreak=True,
+            source_image=None) -> dict[str, Any]:
     budget = LLMBudget()
     if isinstance(model, NoModel):
         budget.unavailable = True
-    understanding = understand(source, target, model, budget, use_model=use_model_understanding)
+    understanding = understand(source, target, model, budget, use_model=use_model_understanding,
+                               source_image=source_image)
 
     layout = repair(source, preset_layout(source, target, understanding), target, understanding)
     preset = Candidate("preset", layout,
@@ -78,7 +85,8 @@ def _resize(source: dict[str, Any], target: dict[str, Any], model: ModelAdapter,
     reason = ("no design attempt beat it" if best is preset
               else "best design attempt by rule cost, then signals")
     record("result", winner=best.name, reason=reason, layout=best.layout,
-           report=best.report.to_dict())
+           report=best.report.to_dict(),
+           rationale=best.rationale.to_dict() if best.rationale else None)
     return best.layout
 
 

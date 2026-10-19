@@ -5,7 +5,7 @@ import urllib.error
 import urllib.request
 from urllib.parse import quote
 
-from engine.model.model import ModelUnavailable
+from engine.model.model import IMAGE_REJECTION_CODES, ImagesUnsupported, ModelUnavailable, png_b64
 
 API = "https://generativelanguage.googleapis.com/v1beta"
 
@@ -24,7 +24,9 @@ def google_json(path, api_key, payload=None, timeout=90):
         labels = {400: "Invalid API key or unsupported model settings", 401: "Invalid API key",
                   403: "API key lacks access", 404: "Model not available",
                   429: "Quota exhausted or rate limited; wait before retrying"}
-        raise ModelUnavailable(f"Gemini HTTP {exc.code}: {labels.get(exc.code, 'Provider request failed')}") from None
+        error = ModelUnavailable(f"Gemini HTTP {exc.code}: {labels.get(exc.code, 'Provider request failed')}")
+        error.status = exc.code
+        raise error from None
     except OSError:
         raise ModelUnavailable("Cannot reach Gemini (connection failed or request timed out)") from None
 
@@ -59,20 +61,29 @@ def thinking_config(model, reasoning):
 
 
 class GeminiModel:
+    accepts_images = True
+
     def __init__(self, model, api_key, reasoning="low", max_tokens=4096, timeout=90):
         self.model, self.api_key = model.removeprefix("models/"), api_key
         self.reasoning, self.max_tokens, self.timeout = reasoning, max_tokens, timeout
         self.last_call = None
         self.thinking = thinking_config(self.model, reasoning)
 
-    def complete(self, prompt):
+    def complete(self, prompt, images=None):
         config = {"temperature": 0, "maxOutputTokens": self.max_tokens,
                   "responseMimeType": "application/json"}
         if self.thinking:
             config["thinkingConfig"] = self.thinking
-        reply = google_json("/models/" + quote(self.model, safe="-") + ":generateContent",
-                            self.api_key, {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                                           "generationConfig": config}, self.timeout)
+        request_parts = [{"text": prompt}] + [
+            {"inline_data": {"mime_type": "image/png", "data": png_b64(image)}} for image in images or ()]
+        try:
+            reply = google_json("/models/" + quote(self.model, safe="-") + ":generateContent",
+                                self.api_key, {"contents": [{"role": "user", "parts": request_parts}],
+                                               "generationConfig": config}, self.timeout)
+        except ModelUnavailable as exc:
+            if images and getattr(exc, "status", None) in IMAGE_REJECTION_CODES:
+                raise ImagesUnsupported(f"{self.model} rejected the image ({exc})") from None
+            raise
         candidate = (reply.get("candidates") or [{}])[0]
         parts = candidate.get("content", {}).get("parts", [])
         usage = reply.get("usageMetadata", {})

@@ -18,6 +18,7 @@ Settings are read from the environment, then from a `.env` file at the repo
 root (never committed; see `.env.example`). Real environment variables win.
 """
 
+import base64
 import json
 import os
 import re
@@ -33,34 +34,58 @@ class ModelUnavailable(Exception):
     """No model can be reached; retrying won't help."""
 
 
+class ImagesUnsupported(Exception):
+    """The model rejected a request because it carried images; the caller
+    can ask the same question without them."""
+
+
+# HTTP statuses that, on a request carrying images, mean "not with images".
+# Some routers answer 404 ("no endpoint supports image input"); if the model
+# itself is missing, the text-only retry gets the same 404 and stops there.
+IMAGE_REJECTION_CODES = (400, 404, 413, 415, 422)
+
+
 class ModelAdapter(Protocol):
-    def complete(self, prompt: str) -> str:
-        """Return the model's reply to `prompt`. Raises ModelUnavailable if
-        no model can be reached. Adapters may also set `last_call` to a dict
-        of extra detail (model, reasoning, usage) for traces."""
+    def complete(self, prompt: str, images: list[bytes] | None = None) -> str:
+        """Return the model's reply to `prompt`, optionally showing it PNG
+        `images`. Raises ModelUnavailable if no model can be reached and
+        ImagesUnsupported if the model refuses the images. Adapters set
+        `accepts_images = True` when they can send images, and may set
+        `last_call` to a dict of extra detail (model, reasoning, usage)."""
         ...
 
 
+def png_b64(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")
+
+
 class NoModel:
-    def complete(self, prompt: str) -> str:
+    accepts_images = False
+
+    def complete(self, prompt: str, images: list[bytes] | None = None) -> str:
         raise ModelUnavailable("no model configured (see .env.example)")
 
 
 class OllamaModel:
     """Deterministic JSON-mode completions from a local Ollama server."""
 
+    accepts_images = True
+
     def __init__(self, model: str, host: str = "http://127.0.0.1:11434", timeout: float = 600):
         self.model, self.host, self.timeout = model, host.rstrip("/"), timeout
         self.last_call = None
 
-    def complete(self, prompt: str) -> str:
-        body = json.dumps({
+    def complete(self, prompt: str, images: list[bytes] | None = None) -> str:
+        payload = {
             "model": self.model,
             "prompt": prompt,
             "format": "json",
             "stream": False,
             "options": {"temperature": 0, "seed": 0},
-        }).encode()
+        }
+        if images:
+            payload["images"] = [png_b64(image) for image in images]
+        body = json.dumps(payload).encode()
         request = urllib.request.Request(f"{self.host}/api/generate", data=body,
                                          headers={"Content-Type": "application/json"})
         try:
@@ -70,12 +95,18 @@ class OllamaModel:
                                   "usage": {"prompt_tokens": reply.get("prompt_eval_count"),
                                             "completion_tokens": reply.get("eval_count")}}
                 return reply["response"]
+        except urllib.error.HTTPError as exc:
+            if images and exc.code in IMAGE_REJECTION_CODES + (500,):
+                raise ImagesUnsupported(f"Ollama model {self.model} rejected the image (HTTP {exc.code})") from None
+            raise ModelUnavailable(f"Ollama at {self.host} returned HTTP {exc.code}") from None
         except OSError as exc:
             raise ModelUnavailable(f"Ollama at {self.host} unreachable: {exc}") from exc
 
 
 class OpenAICompatibleModel:
     """Deterministic chat completions from any OpenAI-compatible API."""
+
+    accepts_images = True
 
     def __init__(self, model: str, base_url: str, api_key: str = "", timeout: float = 600,
                  max_tokens: int | None = None, reasoning: str = "auto"):
@@ -94,10 +125,15 @@ class OpenAICompatibleModel:
         self.max_tokens = max(self.max_tokens or 0, 8192)
         return True
 
-    def complete(self, prompt: str) -> str:
+    def complete(self, prompt: str, images: list[bytes] | None = None) -> str:
+        content: str | list = prompt
+        if images:
+            content = [{"type": "text", "text": prompt}] + [
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64," + png_b64(image)}}
+                for image in images]
         payload = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": content}],
             "temperature": 0,
             "seed": 0,
         }
@@ -121,6 +157,8 @@ class OpenAICompatibleModel:
             detail = exc.read().decode(errors="replace")[:300]
             if self.api_key:
                 detail = detail.replace(self.api_key, "[redacted]")
+            if images and exc.code in IMAGE_REJECTION_CODES:
+                raise ImagesUnsupported(f"{self.model} rejected the image (HTTP {exc.code})") from None
             if exc.code in (401, 403, 404, 408, 429, 502, 503, 504, 524):
                 raise ModelUnavailable(f"Model request unavailable (HTTP {exc.code}); check credentials, quota or provider availability.") from None
             raise RuntimeError(f"{self.base_url} returned {exc.code}: {detail}") from exc  # retried

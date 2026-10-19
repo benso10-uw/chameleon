@@ -119,16 +119,45 @@ function details(label, value, raw = false) {
   const text = typeof value === 'string' ? value : JSON.stringify(value,null,2);
   return `<details${raw ? ' class="raw"' : ''}><summary>${escapeHTML(label)}</summary><pre>${escapeHTML(text)}</pre></details>`;
 }
+const label = t => String(t || '').replaceAll('_',' ');
+function analysisHTML(a) {
+  if (!a) return '';
+  const order = Object.fromEntries((a.technical || []).map((t,i)=>[t.id,i]));
+  const swatches = (a.palette || []).map(p=>`<li><span class="swatch" style="background:${/^#[0-9a-f]{3,8}$/i.test(p.hex || '') ? p.hex : 'transparent'}"></span><strong>${escapeHTML(p.hex)}</strong> ${escapeHTML(p.name || '')}<small>${escapeHTML(p.usage || '')}</small></li>`).join('');
+  const measured = a.extracted_colours ? Object.entries(a.extracted_colours.image_assets || {}).flatMap(([,cs])=>cs).concat((a.extracted_colours.text_colours || []).concat(a.extracted_colours.shape_fills || []).map(hex=>({hex}))) : [];
+  const chips = !swatches && measured.length ? `<p class="analysis-label">Measured colours</p><ul class="palette">${measured.slice(0,12).map(c=>`<li><span class="swatch" style="background:${escapeHTML(c.hex)}"></span>${escapeHTML(c.hex)}</li>`).join('')}</ul>` : '';
+  const reasons = Object.entries(a.priority_reasons || {}).filter(([,w])=>w).sort(([x],[y])=>(order[x] ?? 99)-(order[y] ?? 99));
+  const rel = (a.relationships || []).map(r=>`${[].concat(r.a).join(', ')} ${label(r.relation)} ${[].concat(r.b).join(', ')}${r.note ? ' · '+r.note : ''}`);
+  return `<div class="analysis">${a.description ? `<p class="analysis-description">${escapeHTML(a.description)}</p>` : ''}`
+    + (a.pattern ? `<p><span class="analysis-label">Pattern</span> ${escapeHTML(label(a.pattern))}${a.pattern_notes ? ' — '+escapeHTML(a.pattern_notes) : ''}</p>` : '')
+    + (a.target_pattern ? `<p><span class="analysis-label">Target pattern</span> ${escapeHTML(label(a.target_pattern))}${a.target_pattern_notes ? ' — '+escapeHTML(a.target_pattern_notes) : ''}</p>` : '')
+    + (a.color_scheme ? `<p><span class="analysis-label">Colour scheme</span> ${escapeHTML(label(a.color_scheme))}${a.color_notes ? ' — '+escapeHTML(a.color_notes) : ''}</p>` : '')
+    + (swatches ? `<ul class="palette">${swatches}</ul>` : chips)
+    + (reasons.length ? details(`Why each element matters (${reasons.length}, most important first)`, reasons.map(([id,w])=>`${id}: ${w}`).join('\n')) : '')
+    + (rel.length ? details(`Relationships to keep (${rel.length})`, rel.join('\n')) : '')
+    + details('Technical facts (position, size, layer)', a.technical) + '</div>';
+}
+function rationaleHTML(r) {
+  if (!r || (!r.summary && !Object.keys(r.justifications || {}).length)) return '';
+  const lines = Object.entries(r.justifications || {}).map(([id,w])=>`${id}: ${w}`);
+  if (r.missing?.length) lines.push(`No justification given for: ${r.missing.join(', ')}`);
+  return `<div class="analysis">${r.pattern ? `<p><span class="analysis-label">Pattern</span> ${escapeHTML(label(r.pattern))}</p>` : ''}${r.summary ? `<p class="analysis-description">${escapeHTML(r.summary)}</p>` : ''}${lines.length ? details(`Why each placement (${Object.keys(r.justifications || {}).length})`, lines.join('\n')) : ''}</div>`;
+}
+// Declining the image is an expected fallback (to extracted colours), not a failure.
+const isIssue = s => s.outcome !== 'usable' && s.outcome !== 'images_unsupported';
+const visualNames = {image:'rendered source image', palette:'colours extracted in code', text:'element facts only', none:'none (code heuristics)'};
 function stepHTML(s, i) {
   let title = s.kind, body = '', failed = false;
   if (s.kind === 'llm_start') { title = `Model working · ${s.purpose}`; body = 'Request sent. Waiting for the provider to return a complete reply.'; }
   if (s.kind === 'llm_call') {
-    failed = s.outcome !== 'usable'; title = `${failed ? 'Model request failed' : 'Model replied'} · ${s.purpose}`;
-    const u=s.usage || {}, rt=u.completion_tokens_details?.reasoning_tokens || 0;
-    body = `${seconds(s.seconds)} · ${count(u.total_tokens)} total tokens · ${count(rt)} reasoning tokens${s.finish_reason ? ' · finish: ' + s.finish_reason : ''}`;
+    const refused = s.outcome === 'images_unsupported'; failed = isIssue(s);
+    title = `${refused ? 'Model declined the image' : failed ? 'Model request failed' : 'Model replied'} · ${s.purpose}`;
+    const u=usageOf(s);
+    body = `${seconds(s.seconds)} · ${count(u.total)} total tokens (${count(u.input)} in · ${count(u.output)} out · ${count(u.reasoning)} reasoning)${s.images ? ' · with source image' : ''}${s.finish_reason ? ' · finish: ' + s.finish_reason : ''}`;
     if (s.error) body += ' · ' + s.error;
   }
-  if (s.kind === 'understand') { title = `Design understood · ${s.difficulty}`; body = `${s.decided_by === 'llm' ? 'Model-assigned roles' : 'Code-assigned roles; saved one model call'}${s.pressure_override ? ' · high space pressure forced the hard path' : ''}`; }
+  if (s.kind === 'understand') { title = `Design analysed · ${s.difficulty}`; body = `${s.decided_by === 'llm' ? 'Model design analysis' : 'Code-assigned roles; no model analysis'} · visual input: ${visualNames[s.analysis?.visual_input] || 'none'}${s.pressure_override ? ' · high space pressure forced the hard path' : ''}`; }
+  if (s.kind === 'visual_input') { title = `Visual input · ${visualNames[s.mode] || s.mode}`; body = s.used ? 'Sent with the design analysis request.' : s.reason; }
   if (s.kind === 'preset') { title = 'Preset layout checked'; body = s.decision; }
   if (s.kind === 'attempt') { title = `${s.name} checked`; body = s.new_best ? 'New best layout.' : 'The earlier layout is still preferred.'; }
   if (s.kind === 'tie_break') { title = 'Compared equal rule costs'; body = `${s.a} vs ${s.b}: ${s.winner} wins · ${s.decided_by}`; }
@@ -139,14 +168,14 @@ function stepHTML(s, i) {
   const report=s.report;
   const badge = report ? `<span class="mini${report.passes ? '' : ' bad'}">${report.passes ? 'Rules pass' : `${report.rules.length} rule violations`}</span>` : '';
   const reportHTML = report ? `<p>Rule cost ${report.rule_cost} · quality signal cost ${report.signal_cost}</p>` + details(`Rule violations (${report.rules.length})`,report.rules.length ? report.rules.map(v=>`${v.element_id || 'Canvas'}: ${v.message}`).join('\n') : 'None.') + details(`Quality observations (${report.signals.length})`,report.signals.length ? report.signals.map(v=>`${v.element_id || 'Canvas'}: ${v.message}`).join('\n') : 'None detected. This is not a visual quality guarantee.') : '';
-  return `<article class="step${failed ? ' failure' : ''}" data-step="${i}"><div class="step-header"><h3>${escapeHTML(title)}${badge}</h3><time>+${seconds(s.at_seconds)}</time></div><p>${escapeHTML(body)}</p>${reportHTML}${details('Provider reasoning / summary',s.reasoning)}${details('Roles and priorities',s.roles ? {roles:s.roles,priorities:s.priorities} : null)}${details('Prompt',s.prompt,true)}${details('Raw reply',s.reply,true)}${details('Layout JSON',s.layout,true)}${details('Traceback',s.traceback,true)}</article>`;
+  return `<article class="step${failed ? ' failure' : ''}" data-step="${i}"><div class="step-header"><h3>${escapeHTML(title)}${badge}</h3><time>+${seconds(s.at_seconds)}</time></div><p>${escapeHTML(body)}</p>${s.kind === 'understand' ? analysisHTML(s.analysis) : ''}${s.kind === 'attempt' || s.kind === 'result' ? rationaleHTML(s.rationale) : ''}${reportHTML}${details('Provider reasoning / summary',s.reasoning)}${details('Roles and priorities',s.roles ? {roles:s.roles,priorities:s.priorities} : null)}${details('Prompt',s.prompt,true)}${details('Raw reply',s.reply,true)}${details('Layout JSON',s.layout,true)}${details('Traceback',s.traceback,true)}</article>`;
 }
 function updateRun(after) {
   const r = state.run;
   if (!after) $('timeline').replaceChildren();
   r.steps.slice(after).forEach((s,i) => $('timeline').insertAdjacentHTML('beforeend',stepHTML(s,after+i)));
   showWarnings([...new Set(r.warnings || [])]);
-  const failures=r.steps.filter(s=>s.kind==='llm_call' && s.outcome!=='usable');
+  const failures=r.steps.filter(s=>s.kind==='llm_call' && isIssue(s));
   const usable=r.steps.some(s=>s.kind==='llm_call' && s.outcome==='usable');
   $('state').textContent = r.state==='running' ? 'Running' : r.state==='done' ? (failures.length && !usable ? 'Complete · model unavailable' : 'Complete') : r.state;
   $('state').classList.toggle('bad',r.state==='failed' || failures.length>0);
@@ -169,8 +198,26 @@ function showCandidate(index) {
   $('result-title').textContent=s.kind==='result' ? `Returned · ${s.winner}` : s.name || 'Preset layout';
   if (src) { $('result-image').src=src; $('result-image').hidden=false; $('result-empty').hidden=true; }
   else { $('result-image').hidden=true; $('result-empty').hidden=false; $('result-empty').textContent=r.state==='running' ? 'Rendering preview…' : 'Preview unavailable. Check run warnings.'; }
+  const summary=s.rationale?.summary || '';
+  $('result-summary').hidden=!summary; $('result-summary').textContent=summary;
   $('result-foot').textContent=s.report ? `${s.report.passes ? 'Rules pass' : s.report.rules.length+' rule violations'} · ${s.report.signals.length} quality observations · rule cost ${s.report.rule_cost}` : 'Safety layout · inspect the error in the trace.';
   document.querySelectorAll('[data-candidate]').forEach(b=>b.classList.toggle('active',Number(b.dataset.candidate)===index));
+}
+function usageOf(s) {
+  const u=s.usage || {}, input=u.prompt_tokens || 0, output=u.completion_tokens || 0;
+  // Ollama reports no total; Gemini's total already includes thought tokens.
+  return {input, output, reasoning:u.completion_tokens_details?.reasoning_tokens || 0, total:u.total_tokens || input+output};
+}
+function updateUsage(r,calls,elapsed) {
+  $('usage').hidden=!r;
+  if (!r) return;
+  const rows=calls.map(s=>({s,...usageOf(s)})), sum=k=>rows.reduce((n,x)=>n+x[k],0);
+  const modelTime=calls.reduce((n,s)=>n+(s.seconds || 0),0);
+  const pending=r.state==='running' && r.steps.at(-1)?.kind==='llm_start';
+  const stat=(label,value)=>`<div><strong>${value}</strong><span>${label}</span></div>`;
+  const table=rows.length ? `<div class="usage-table"><table><thead><tr><th>#</th><th>Request</th><th>Outcome</th><th>Time</th><th>Input</th><th>Output</th><th>Reasoning</th><th>Total</th></tr></thead><tbody>${rows.map((x,i)=>`<tr${isIssue(x.s) ? ' class="bad"' : ''}><td>${i+1}</td><td>${escapeHTML(x.s.purpose)}</td><td>${escapeHTML(x.s.outcome)}</td><td>${seconds(x.s.seconds)}</td><td>${count(x.input)}</td><td>${count(x.output)}</td><td>${count(x.reasoning)}</td><td>${count(x.total)}</td></tr>`).join('')}</tbody><tfoot><tr><td></td><td colspan="2">All requests</td><td>${seconds(modelTime)}</td><td>${count(sum('input'))}</td><td>${count(sum('output'))}</td><td>${count(sum('reasoning'))}</td><td>${count(sum('total'))}</td></tr></tfoot></table></div>` : '';
+  $('usage').innerHTML=`<div class="usage-head"><div><span>Total token usage</span><strong>${count(sum('total'))}</strong></div><p>${rows.length ? `${rows.length} model request${rows.length===1 ? '' : 's'}` : 'No model requests · preset only or model skipped'}${pending ? ' · one request in progress' : ''}</p></div>`
+    + `<div class="usage-stats">${stat('input tokens',count(sum('input')))}${stat('output tokens',count(sum('output')))}${stat('reasoning tokens',count(sum('reasoning')))}${stat('time in model requests',seconds(modelTime))}${stat('time in code',seconds(Math.max(0,elapsed-modelTime)))}${stat('total elapsed',seconds(elapsed))}</div>${table}`;
 }
 function updateMetrics() {
   const r=state.run,calls=(r?.steps || []).filter(s=>s.kind==='llm_call');
@@ -180,8 +227,9 @@ function updateMetrics() {
   const elapsed=r ? r.state==='running' ? (Date.now()/1000-r.created) : r.seconds || Math.max(0,...r.steps.map(s=>s.at_seconds || 0)) : 0;
   const values = [r ? seconds(elapsed) : '—',r ? String(calls.length) : '—',r ? count(reasoning) : '—',final?.report ? String(final.report.rules.length) : '—'];
   [...$('metrics').children].forEach((el,i)=>el.querySelector('strong').textContent=values[i]);
+  updateUsage(r,calls,elapsed);
   if (calls.length) {
-    const failed=calls.filter(s=>s.outcome!=='usable').reduce((n,s)=>n+(s.seconds || 0),0);
+    const failed=calls.filter(isIssue).reduce((n,s)=>n+(s.seconds || 0),0);
     const total=calls.reduce((n,s)=>n+(s.seconds || 0),0);
     // Gemini completion_tokens excludes thought tokens; OpenAI includes them.
     const denom=r.model?.startsWith('gemini') ? completion+reasoning : completion;

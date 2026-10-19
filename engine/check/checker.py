@@ -33,6 +33,8 @@ OVERFLOW_TOLERANCE = 1.0  # px
 ABSOLUTE_TEXT_FLOOR = 6.0
 OVERLAP_MIN_FRACTION = 0.02
 SPACE_USE_MIN = 0.45
+QR_MIN_PX = 64.0  # below this a printed or on-screen QR code stops scanning reliably
+QR_MIN_SHORT_SIDE = 0.7  # ...unless the canvas itself is too short for that
 
 
 @dataclass
@@ -142,13 +144,13 @@ def check(source: dict[str, Any], layout: dict[str, Any], target_canvas: dict[st
             rule("invisible", eid, 1.0, f"'{eid}' is not visible (zero opacity or size)")
             continue
 
-        # --- Rules: nothing off the target canvas -------------------------
+        # --- Signals: element reaches off the target canvas ---------------
         x0, y0, x1, y1 = bbox(el)
         outside = (max(0, -x0) + max(0, x1 - W)) * (y1 - y0) + (max(0, -y0) + max(0, y1 - H)) * (x1 - x0)
         if (x0 < -CANVAS_TOLERANCE or y0 < -CANVAS_TOLERANCE
                 or x1 > W + CANVAS_TOLERANCE or y1 > H + CANVAS_TOLERANCE):
             area = max((x1 - x0) * (y1 - y0), 1)
-            rule("off_canvas", eid, min(1.0, outside / area),
+            signal("off_canvas", eid, min(1.0, outside / area),
                  f"'{eid}' extends outside the {W}x{H} canvas (bounds {x0:.0f},{y0:.0f},{x1:.0f},{y1:.0f})")
 
         # --- Rules: images keep their proportions -------------------------
@@ -177,6 +179,15 @@ def check(source: dict[str, Any], layout: dict[str, Any], target_canvas: dict[st
                 rule("text_overflow", eid, min(1.0, severity),
                      f"'{eid}' text needs {metrics.widest_line:.0f}x{metrics.height:.0f}px "
                      f"but its box is {el['width']:.0f}x{el['height']:.0f}px")
+
+    # --- Signals: QR codes stay scannable -------------------------------------
+    for eid, el in out_by_id.items():
+        if roles.get(eid) == "qr_code" and _has_geometry(el):
+            need = min(QR_MIN_PX, QR_MIN_SHORT_SIDE * min(W, H))
+            side = min(el["width"], el["height"])
+            if side < need:
+                signal("qr_too_small", eid, min(1.0, (need - side) / need),
+                       f"QR code '{eid}' is {side:.0f}px; keep it at least {need:.0f}px to scan")
 
     # --- Rules: groups move as one ------------------------------------------
     for gid, members in groups_of(source["elements"]).items():

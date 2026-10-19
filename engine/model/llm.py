@@ -9,9 +9,11 @@ unreachable model ends the budget at once, since retrying can't help.
 import json
 import re
 import time
+from pathlib import Path
+from string import Template
 from typing import Any, Callable, Optional, TypeVar
 
-from engine.model.model import ModelAdapter, ModelUnavailable
+from engine.model.model import ImagesUnsupported, ModelAdapter, ModelUnavailable
 from engine.tracing.trace import record
 
 T = TypeVar("T")
@@ -43,9 +45,16 @@ class LLMBudget:
         self.consecutive = 0
 
 
+def render_prompt(path: Path, **values: Any) -> str:
+    """Fill a prompt template's $placeholders. A missing value raises KeyError."""
+    return Template(path.read_text(encoding="utf-8").rstrip("\n")).substitute(values)
+
+
 def ask_json(model: ModelAdapter, prompt: str, parse: Callable[[Any], T],
-             budget: LLMBudget, purpose: str = "") -> Optional[T]:
-    """Ask until `parse` accepts the reply or the budget runs out."""
+             budget: LLMBudget, purpose: str = "", images: Optional[list[bytes]] = None) -> Optional[T]:
+    """Ask until `parse` accepts the reply or the budget runs out. With
+    `images`, a model that refuses them raises ImagesUnsupported to the
+    caller, which can ask again without them; that costs no budget."""
     mistake = None
     while not budget.exhausted:
         full = prompt
@@ -54,20 +63,24 @@ def ask_json(model: ModelAdapter, prompt: str, parse: Callable[[Any], T],
                      "Do not repeat this mistake. Reply with the JSON object only.")
         started = time.perf_counter()
         record("llm_start", purpose=purpose, model=getattr(model, "model", "none"),
-               request_number=budget.total + 1)
+               request_number=budget.total + 1, images=len(images or ()))
         if hasattr(model, "last_call"):
             model.last_call = None
 
         def log(outcome, reply=None, error=None):
             meta = getattr(model, "last_call", None) or {}
             record("llm_call", purpose=purpose, outcome=outcome, prompt=full, reply=reply,
-                   error=error, reasoning=meta.get("reasoning"), usage=meta.get("usage"),
+                   error=error, images=len(images or ()), reasoning=meta.get("reasoning"),
+                   usage=meta.get("usage"),
                    model=meta.get("model"), finish_reason=meta.get("finish_reason"),
                    seconds=round(time.perf_counter() - started, 2),
                    failures={"consecutive": budget.consecutive, "total": budget.total})
 
         try:
-            reply = model.complete(full)
+            reply = model.complete(full, images=images) if images else model.complete(full)
+        except ImagesUnsupported as exc:
+            log("images_unsupported", error=str(exc))
+            raise
         except ModelUnavailable as exc:
             budget.unavailable = True
             log("unavailable", error=str(exc))

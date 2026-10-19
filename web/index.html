@@ -24,7 +24,7 @@
   <label for="tokens">Reply token cap</label><input id="tokens" type="number" min="512" max="32768" value="4096">
   <label for="timeout">Request timeout (seconds)</label><input id="timeout" type="number" min="10" max="180" value="90">
   <label class="check"><input id="refine" type="checkbox" checked> Ask the model to refine easy designs</label>
-  <label class="check"><input id="understanding" type="checkbox"> Use the model to assign roles</label>
+  <label class="check"><input id="understanding" type="checkbox" checked> Use the model to analyse the design (colours, pattern, roles)</label>
   <label class="check"><input id="tiebreak" type="checkbox"> Use the model to judge ties</label>
  </details>
  <div class="section-title">03 <span>Previous runs</span></div><button id="refresh-history" class="subtle" type="button">↻ Refresh history</button><div id="history"></div>
@@ -35,11 +35,12 @@
  <div id="warnings" role="status"></div>
  <section class="previews" aria-label="Design comparison">
   <article class="preview source"><div class="preview-head"><h2>Source design</h2><span id="source-size"></span></div><div class="image-stage"><img id="source-image" alt="Source design preview" hidden><p id="source-empty">Select a sample to begin.</p></div></article>
-  <article class="preview result"><div class="preview-head"><h2 id="result-title">Target canvas</h2><span id="target-size"></span></div><div class="image-stage"><img id="result-image" alt="Selected layout preview" hidden><p id="result-empty">Run a design or open a saved trace.</p></div><div id="result-foot"></div></article>
+  <article class="preview result"><div class="preview-head"><h2 id="result-title">Target canvas</h2><span id="target-size"></span></div><div class="image-stage"><img id="result-image" alt="Selected layout preview" hidden><p id="result-empty">Run a design or open a saved trace.</p></div><div id="result-foot"></div><p id="result-summary" hidden></p></article>
  </section>
  <div id="candidates" class="candidates" aria-label="Layout candidates"></div>
  <section class="trace-section"><div class="trace-heading"><div><p class="eyebrow">WHAT HAPPENED</p><h2>Run trace <span id="live-dot" hidden>● LIVE</span></h2></div><div id="downloads"></div></div>
   <div id="metrics" class="metrics"><div><strong>—</strong><span>elapsed</span></div><div><strong>—</strong><span>model calls</span></div><div><strong>—</strong><span>reasoning tokens</span></div><div><strong>—</strong><span>rule violations</span></div></div>
+  <div id="usage" class="usage" hidden></div>
   <div id="insight" class="insight" hidden></div>
   <div class="trace-tools"><label class="check"><input id="show-details" type="checkbox"> Show prompts and raw replies</label><span>Newest steps appear at the bottom</span></div>
   <div id="timeline" class="timeline"><p class="empty">Your run will appear here, one step at a time.</p></div>

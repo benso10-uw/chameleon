@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from engine.analyze.visual import shrink_png
 from engine.model.gemini import GeminiModel, list_models
 from engine.model.model import NoModel, OllamaModel, OpenAICompatibleModel, load_env_file
 from engine.resize import resize
@@ -94,12 +95,23 @@ def task_id(task):
     return hashlib.sha256(json.dumps(task, sort_keys=True).encode()).hexdigest()[:16]
 
 
+def source_path(task):
+    return OUTPUT / "sources" / f"{task_id(task)}.png"
+
+
 def source_image(task):
-    key = task_id(task)
-    path = OUTPUT / "sources" / f"{key}.png"
+    path = source_path(task)
     if not path.exists():
         render(task["source"], path)
     return "/media/workbench/sources/" + path.name
+
+
+def source_png(task, model):
+    """The cached source preview for design analysis, if the model takes images."""
+    path = source_path(task)
+    if not getattr(model, "accepts_images", False) or not path.exists():
+        return None
+    return shrink_png(path.read_bytes())
 
 
 def make_model(config):
@@ -144,7 +156,7 @@ class Run:
         self.data = {"id": self.id, "name": name, "state": "running", "created": time.time(),
                      "model": getattr(model, "model", "Preset only"), "reasoning": config.get("reasoning", "auto"),
                      "task": self.task, "steps": [], "images": {}, "warnings": warnings(task), "error": None}
-        self.options = {"use_model_understanding": bool(config.get("model_understanding", False)),
+        self.options = {"use_model_understanding": bool(config.get("model_understanding", True)),
                         "refine": bool(config.get("refine", True)) and not isinstance(model, NoModel),
                         "llm_tiebreak": bool(config.get("llm_tiebreak", False)),
                         "max_attempts": int(config.get("attempts", 2))}
@@ -171,7 +183,7 @@ class Run:
         try:
             self.data["images"]["source"] = source_image(self.task)
             out = resize(self.task["source"], self.task["target_canvas"], model=self.model,
-                         trace=trace, **self.options)
+                         trace=trace, source_image=source_png(self.task, self.model), **self.options)
             (self.folder / "output.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
             self.data["state"] = "done"
         except Cancelled:

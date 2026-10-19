@@ -44,8 +44,12 @@ python -m venv .venv
   request to finish; completed steps are retained.
 - **Refine easy designs:** enabled for model runs so Levels 1 and 2 can receive
   design attempts even when their presets pass.
-- **Use the model to assign roles:** off by default to save a request. Enable
-  when the inferred roles look wrong.
+- **Use the model to analyse the design:** on by default. One request returns
+  the palette and colour scheme, composition pattern, a description of how the
+  design works, roles/priorities with reasons and relationships. The layout
+  prompt uses all of it. The source preview is attached as an image; a model
+  that refuses images gets extracted colours instead. Turn off to save a
+  request (code-assigned roles, no description).
 - **Use the model to judge ties:** off by default. Rule costs decide first,
   then measured quality signals. Enable to let the model judge equal rule costs.
 - **Reasoning:** Gemini 2.5 Flash supports off where available. Newer Gemini

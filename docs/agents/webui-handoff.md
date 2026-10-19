@@ -55,13 +55,18 @@ new settings does not rerun a saved result.
 7. Expand **Run settings**. For a model to generate a layout on easy/Core
    designs, keep **Ask the model to refine easy designs** checked. Otherwise
    a passing easy preset returns early. Two attempts is the UI default.
-   Model-assigned roles and model tie judging default off to save requests.
+   Model design analysis defaults ON (one request, with the source preview
+   image when the provider accepts it). Model tie judging defaults off.
 8. Click **Run selected design**. Observe the pending status and live stages.
    This is stage-level polling, NOT token-by-token streaming. A long request
    can show no new step until its response or timeout.
 9. Click **Preset layout**, **attempt 1**, **attempt 2**, or **Returned layout**
    to inspect each candidate. Click a preview image for full resolution.
-10. Expand rule violations and quality observations. Provider reasoning is
+10. The token usage panel under the Run trace heading totals input, output
+    and reasoning tokens. It splits elapsed time into model requests and code,
+    and lists every request's time and tokens. Ollama reports no total, so
+    the panel uses input + output.
+    Expand rule violations and quality observations. Provider reasoning is
     collapsed by default; enable **Show prompts and raw replies** to inspect
     the exact prompt and response.
 11. **Previous runs** opens saved results. It does not restore all provider
@@ -78,6 +83,9 @@ new settings does not rerun a saved result.
 | `llm_start` / Model working | Request started; wait for `llm_call` or timeout. |
 | Model replied / `usable` | Reply parsed and was accepted as a design attempt; it can still break design rules. |
 | `finish: length` / `MAX_TOKENS` | Token cap truncated the response. Inspect usage, reasoning tokens and reply. |
+| `Model declined the image` / `images_unsupported` | Expected fallback, not a failure: the analysis is retried with code-extracted colours (`visual_input` steps show which input was used). |
+| `Design analysed` panel | Description, patterns, colour scheme, palette, priority reasons, relationships, technical facts. Empty fields mean code heuristics stood. |
+| Attempt panel pattern / summary / "Why each placement" | The layout model's extracted rationale; the next attempt is shown it. Missing justifications are listed, not counted as failures. |
 | `model_recovery` | Qwen gets one retry with thinking off and at least 8192 tokens. Repeated truncation stops; other providers stop so settings can be adjusted. |
 | Rule violations | Candidate breaks geometry/content rules; see exact affected elements. |
 | Rules pass | Structural validity only. Inspect PNG for visual quality and small text. |
@@ -146,7 +154,7 @@ git diff --check
 Then test one task with the provider/settings affected by the change. Check
 the actual saved trace for usable replies, returned candidate, warnings and
 PNG appearance. A passing unit test or HTTP 200 is not enough to claim good
-design quality. The last engine test run had 62 passing tests.
+design quality. The last engine test run had 72 passing tests.
 
 Desktop browser functionality was verified previously. Mobile, full keyboard,
 contrast and reduced-motion checks were not completed because browser access
@@ -157,5 +165,6 @@ Preserve existing results, secrets and unrelated edits. Do not print `.env`
 or place credentials in docs, screenshots, prompts, commits or run records.
 The workbench reads `GEMINI_API_KEY` and the `CHAMELEON_LLM_*` configuration.
 The form's supplied key is used for the run and is not persisted by the form.
-Model calls transmit task text/element facts to the selected provider; this
-implementation does not send rendered images for visual critique.
+Model calls transmit task text/element facts to the selected provider. The
+design-analysis call also sends the rendered source preview (PNG, at most
+1024px) when the adapter supports images. Layout attempts are text-only.

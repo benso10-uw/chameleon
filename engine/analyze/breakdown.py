@@ -7,17 +7,29 @@ element; priorities are unique.
 """
 
 import math
+import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from engine.analyze.text_metrics import single_line_width
 
 ROLES = ("background", "decoration", "logo", "product", "image", "headline", "subhead",
-         "body", "legal", "cta", "badge", "label")
+         "body", "legal", "cta", "badge", "label", "qr_code", "date")
 
-# Lower = more important. Ties are broken by area (bigger first).
-_ROLE_RANK = {"headline": 0, "product": 1, "logo": 2, "cta": 3, "subhead": 4, "badge": 5,
-              "body": 6, "image": 7, "label": 8, "legal": 9, "decoration": 10, "background": 11}
+# Lower = more important. Ties are broken by area (bigger first). Titles, QR
+# codes and dates carry the message a viewer must act on, so they lead.
+_ROLE_RANK = {"headline": 0, "qr_code": 0.4, "date": 0.5, "product": 1, "logo": 2, "cta": 3,
+              "subhead": 4, "badge": 5, "body": 6, "image": 7, "label": 8, "legal": 9,
+              "decoration": 10, "background": 11}
+
+_MONTH = (r"(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?")
+_DATE = re.compile(
+    rf"\b{_MONTH}\s+\d{{1,2}}(st|nd|rd|th)?\b"           # June 21, Jun 21st
+    rf"|\b\d{{1,2}}(st|nd|rd|th)?\s+(of\s+)?{_MONTH}\b"  # 21 June, 21st of June
+    r"|\b\d{1,4}[/.-]\d{1,2}[/.-]\d{1,4}\b"              # 21/06/2026, 2026-06-21
+    r"|\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*day\b",
+    re.IGNORECASE)
+_DATE_MAX_CHARS = 60
 
 TEXT_FLOOR = 10.0
 LOWEST_TEXT_FLOOR = 6.0
@@ -31,6 +43,7 @@ class Understanding:
     priorities: dict[str, int]
     difficulty: str  # "easy" | "hard"
     measurements: dict[str, float] = field(default_factory=dict)
+    analysis: Optional[Any] = None  # DesignAnalysis (engine/analyze/analysis.py)
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +124,10 @@ def infer_roles(source: dict[str, Any]) -> dict[str, str]:
     # Images: the topmost wide one in the upper third is the logo; the
     # biggest of the rest is the product.
     images = [e for e in elements if e["type"] == "image" and e["id"] not in roles]
+    for e in images:
+        if is_qr_code(e):
+            roles[e["id"]] = "qr_code"
+    images = [e for e in images if e["id"] not in roles]
     logos = [e for e in images if e["width"] >= 1.8 * e["height"] and e["y"] < H / 3]
     logo = min(logos, key=lambda e: e["y"]) if logos else None
     rest = [e for e in images if e is not logo]
@@ -120,6 +137,10 @@ def infer_roles(source: dict[str, Any]) -> dict[str, str]:
 
     # Text: rank by font size; the smallest long line near the bottom is legal.
     texts = [e for e in elements if e["type"] == "text" and e["id"] not in roles]
+    for e in texts:
+        if is_date(e):
+            roles[e["id"]] = "date"
+    texts = [e for e in texts if e["id"] not in roles]
     texts.sort(key=lambda e: (-e["font_size"], e["y"]))
     for i, e in enumerate(texts):
         bottom = e["y"] + e["height"] >= 0.85 * H
@@ -136,6 +157,18 @@ def infer_roles(source: dict[str, Any]) -> dict[str, str]:
     for el in elements:
         roles.setdefault(el["id"], "image" if el["type"] != "text" else "body")
     return roles
+
+
+def is_qr_code(el: dict[str, Any]) -> bool:
+    """Designs carry no labels, so a QR code is recognised by its name."""
+    name = f"{el.get('id', '')} {el.get('asset_id', '')}".lower()
+    return el["type"] in ("image", "shape") and bool(re.search(r"(^|[^a-z])qr([^a-z]|$)|qrcode", name))
+
+
+def is_date(el: dict[str, Any]) -> bool:
+    """Short text that reads as a date or day (not a long line that mentions one)."""
+    content = el.get("content") or ""
+    return len(content) <= _DATE_MAX_CHARS and bool(_DATE.search(content))
 
 
 def infer_priorities(source: dict[str, Any], roles: dict[str, str]) -> dict[str, int]:
